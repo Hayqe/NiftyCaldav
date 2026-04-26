@@ -30,6 +30,30 @@ class CalendarService:
         )
 
     @staticmethod
+    def create_calendar_radicale(calendar: CalendarCreate, username: str) -> dict:
+        """Create calendar directly in Radicale (no database)."""
+        client = CalDAVClient()
+        if not client.connect(username, "admin"):
+            raise Exception("Failed to connect to CalDAV")
+        
+        if client.calendar_exists(calendar.name):
+            raise Exception(f"Calendar '{calendar.name}' already exists")
+        
+        if not client.create_calendar(calendar.name, calendar.description):
+            raise Exception(f"Failed to create calendar '{calendar.name}' in Radicale")
+        
+        # Return calendar info from Radicale
+        cal = client.get_calendar(calendar.name)
+        cal_url = str(cal.url) if cal else f"{client.radicale_url}/{username}/{calendar.name}/"
+        return {
+            "name": calendar.name,
+            "url": cal_url,
+            "description": calendar.description,
+            "color": calendar.color or "blue",
+            "owner_username": username
+        }
+
+    @staticmethod
     def create_calendar(db: Session, calendar: CalendarCreate, owner_id: int) -> Calendar:
         db_calendar = Calendar(
             name=calendar.name,

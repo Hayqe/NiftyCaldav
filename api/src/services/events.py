@@ -60,15 +60,20 @@ class EventService:
         if not calendar_name:
             return None
         
+        # Get username from client for Radicale calendar path
+        username = client.client.username if hasattr(client.client, 'username') else 'admin'
+        # For Radicale, calendar path is username/calendar_name
+        calendar_path = f"{username}/{calendar_name}"
+        
         # Also try with just "admin" password for demo
         # First try with our method
         try:
             # First ensure calendar exists in CalDAV
-            if not client.calendar_exists(calendar_name):
-                client.create_calendar(calendar_name)
+            if not client.calendar_exists(calendar_path):
+                client.create_calendar(calendar_path)
             
             event_url = client.create_event(
-                calendar_name=calendar_name,
+                calendar_name=calendar_path,
                 summary=event.summary,
                 start=event.start,
                 end=event.end,
@@ -110,12 +115,23 @@ class EventService:
         if not client:
             return None
         
+        # Get username for Radicale calendar path
+        user = UserService.get_user(db, user_id)
+        username = user.username if user else 'admin'
+        
         calendar_name = EventService._get_calendar_name(db, calendar_id)
         if not calendar_name:
             return None
         
+        # For Radicale, calendar path is username/calendar_name
+        calendar_path = f"{username}/{calendar_name}"
+        
+        # Ensure calendar exists in CalDAV
+        if not client.calendar_exists(calendar_path):
+            client.create_calendar(calendar_path)
+        
         try:
-            event_data = client.get_event(calendar_name, event_id)
+            event_data = client.get_event(calendar_path, event_id)
             if event_data:
                 return EventInDB(
                     id=event_id,
@@ -182,6 +198,11 @@ class EventService:
                 print(f"DEBUG: Using calendar_path={calendar_path}")
                 calendar_names = [calendar_path]
                 calendar_id_map[calendar_path] = calendar_id
+                
+                # Ensure calendar exists in CalDAV (pass just the calendar name, not the full path)
+                if not client.calendar_exists(calendar_name):
+                    print(f"DEBUG: Creating calendar {calendar_name} in CalDAV")
+                    client.create_calendar(calendar_name)
             else:
                 # All calendars case - get own and shared
                 from ..models import Calendar, CalendarShare
@@ -190,6 +211,10 @@ class EventService:
                     calendar_path = f"{user.username}/{c.name}"
                     calendar_names.append(calendar_path)
                     calendar_id_map[calendar_path] = c.id
+                    # Ensure calendar exists in CalDAV
+                    if not client.calendar_exists(calendar_path):
+                        print(f"DEBUG: Creating calendar {calendar_path} in CalDAV")
+                        client.create_calendar(calendar_path)
                 
                 # Shared calendars
                 shares = db.query(CalendarShare).filter(CalendarShare.user_id == user_id).all()
@@ -198,6 +223,10 @@ class EventService:
                     if cal_path not in calendar_id_map:
                         calendar_names.append(cal_path)
                         calendar_id_map[cal_path] = share.calendar.id
+                        # Ensure calendar exists in CalDAV
+                        if not client.calendar_exists(cal_path):
+                            print(f"DEBUG: Creating calendar {cal_path} in CalDAV")
+                            client.create_calendar(cal_path)
             
             if not calendar_names:
                 print(f"DEBUG: No calendar names found")
@@ -255,13 +284,24 @@ class EventService:
         if not client:
             return None
         
+        # Get username for Radicale calendar path
+        user = UserService.get_user(db, user_id)
+        username = user.username if user else 'admin'
+        
         calendar_name = EventService._get_calendar_name(db, calendar_id)
         if not calendar_name:
             return None
         
+        # For Radicale, calendar path is username/calendar_name
+        calendar_path = f"{username}/{calendar_name}"
+        
+        # Ensure calendar exists in CalDAV
+        if not client.calendar_exists(calendar_path):
+            client.create_calendar(calendar_path)
+        
         try:
             # Get old event to preserve any missing fields
-            old_event = client.get_event(calendar_name, event_id)
+            old_event = client.get_event(calendar_path, event_id)
             if not old_event:
                 return None
             
@@ -274,7 +314,7 @@ class EventService:
             
             success = client.update_event(
                 calendar_name=calendar_name,
-                event_url=event_id,
+                event_id=event_id,
                 summary=summary,
                 start=start,
                 end=end,
@@ -316,12 +356,23 @@ class EventService:
         if not client:
             return False
         
+        # Get username for Radicale calendar path
+        user = UserService.get_user(db, user_id)
+        username = user.username if user else 'admin'
+        
         calendar_name = EventService._get_calendar_name(db, calendar_id)
         if not calendar_name:
             return False
         
+        # For Radicale, calendar path is username/calendar_name
+        calendar_path = f"{username}/{calendar_name}"
+        
+        # Ensure calendar exists in CalDAV
+        if not client.calendar_exists(calendar_path):
+            client.create_calendar(calendar_path)
+        
         try:
-            return client.delete_event(calendar_name, event_id)
+            return client.delete_event(calendar_path, event_id)
         except Exception as e:
             print(f"Error deleting event: {e}")
             return False

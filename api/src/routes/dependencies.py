@@ -56,6 +56,35 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
     return current_user
 
 
+def get_current_user_from_token(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
+) -> dict:
+    """
+    Get user info directly from JWT token without database lookup.
+    Returns payload dict with sub (user_id), username, role.
+    """
+    token = credentials.credentials
+    payload = AuthService.verify_token(token)
+    
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    user_id = payload.get("sub")
+    if not user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    return payload
+
+
 def get_admin_user(current_user: User = Depends(get_current_active_user)) -> User:
     """
     Ensure the current user has admin privileges.

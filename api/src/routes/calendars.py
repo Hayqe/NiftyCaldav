@@ -1,71 +1,75 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Annotated
+from typing import List, Annotated, Optional
 
 from ..database import get_db
 from ..models import User, Calendar, CalendarShare
 from ..schemas.calendars import (
-    CalendarCreate, CalendarUpdate, CalendarInDB, 
-    CalendarShareCreate, CalendarShareInDB, CalendarWithShares
+    CalendarCreate, CalendarUpdate, CalendarInDB, CalendarRadicale, 
+    CalendarShareCreate, CalendarShareInDB, CalendarWithShares, CalendarRadicaleWithShares
 )
 from ..services.calendars import CalendarService
-from .dependencies import get_current_active_user, get_admin_user
+from ..services.caldav_client import CalDAVClient
+from .dependencies import get_current_active_user, get_admin_user, get_current_user_from_token
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
 
 
-@router.post("/", response_model=CalendarInDB, summary="Create a new calendar")
+@router.post("/", response_model=CalendarRadicale, summary="Create a new calendar in Radicale")
 async def create_calendar(
     calendar: CalendarCreate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    token_payload: dict = Depends(get_current_user_from_token)
 ):
     """
-    Create a new calendar. User creates their own calendar.
+    Create a new calendar directly in Radicale (no database).
+    Returns calendar info from Radicale.
     """
-    return CalendarService.create_calendar(db, calendar, current_user.id)
+    username = token_payload.get("username", "admin")
+    try:
+        result = CalendarService.create_calendar_radicale(calendar, username)
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
 
 
-@router.get("/", response_model=List[CalendarWithShares], summary="List all calendars")
+@router.get("/", response_model=List[CalendarRadicaleWithShares], summary="List all calendars from Radicale")
 async def read_calendars(
-    skip: int = 0,
-    limit: int = 100,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    token_payload: dict = Depends(get_current_user_from_token)
 ):
     """
-    List calendars. Regular users see their own + shared calendars. Admins see all.
+    List all calendars for the current user directly from Radicale.
+    Admin users see all calendars on the server.
     """
-    if current_user.role == "admin":
-        calendars = CalendarService.get_all_calendars(db, skip, limit)
-    else:
-        # Get user's own calendars
-        own_calendars = CalendarService.get_calendars_by_owner(db, current_user.id, skip, limit)
-        
-        # Get shared calendars
-        shared_calendars = CalendarService.get_shared_calendars_for_user(db, current_user.id)
-        
-        # Combine and deduplicate
-        calendar_ids = {c.id for c in own_calendars}
-        calendars = own_calendars
-        for c in shared_calendars:
-            if c.id not in calendar_ids:
-                calendars.append(c)
+    username = token_payload.get("username", "admin")
+    client = CalDAVClient()
+    if not client.connect(username, "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to connect to CalDAV"
+        )
     
-    # Add shares to each calendar
+    # Get all calendars for this user from Radicale
+    raw_calendars = client.get_calendars()
+    
     result = []
-    for calendar in calendars:
-        shares = CalendarService.get_shares_for_calendar(db, calendar.id)
-        result.append(CalendarWithShares.model_validate({
-            "id": calendar.id,
-            "name": calendar.name,
-            "description": calendar.description,
-            "color": calendar.color,
-            "owner_id": calendar.owner_id,
-            "created_at": calendar.created_at,
-            "updated_at": calendar.updated_at,
-            "shares": shares
-        }))
+    for cal_info in raw_calendars:
+        cal_name = cal_info.get('name')
+        cal_url = cal_info.get('url')
+        cal_desc = cal_info.get('description')
+        cal_color = cal_info.get('color', 'blue')
+        cal_owner = cal_info.get('owner_username')
+        
+        result.append(CalendarRadicaleWithShares(
+            name=cal_name,
+            url=cal_url,
+            description=cal_desc,
+            color=cal_color,
+            owner_username=cal_owner,
+            shares=[]  # Shares will be added in a separate step
+        ))
     
     return result
 

@@ -59,8 +59,37 @@ class CalDAVClient:
             return None
         return self.client.principal()
     
+    def get_calendar_color(self, calendar_url: str) -> Optional[str]:
+        """Get the color of a calendar from Radicale via PROPFIND."""
+        try:
+            import requests
+            from requests.auth import HTTPBasicAuth
+            import re
+            
+            username = self.client.username if hasattr(self.client, 'username') else None
+            password = self.client.password if hasattr(self.client, 'password') else "admin"
+            
+            # Clean up URL (remove trailing slash)
+            url = calendar_url.rstrip('/') + '/'
+            
+            response = requests.request(
+                'PROPFIND',
+                url,
+                auth=HTTPBasicAuth(username, password),
+                headers={'Depth': '0'}
+            )
+            
+            if response.status_code == 207:
+                # Parse color from XML response
+                match = re.search(r'<C:calendar-color>([^<]+)</C:calendar-color>', response.text)
+                if match:
+                    return match.group(1)
+        except Exception as e:
+            print(f"Error getting calendar color: {e}")
+        return None
+    
     def get_calendars(self) -> List[Dict[str, Any]]:
-        """Get all calendar collections for the authenticated user."""
+        """Get all calendar collections for the authenticated user with colors."""
         if not self.is_connected():
             return []
         
@@ -68,12 +97,33 @@ class CalDAVClient:
             principal = self.get_principal()
             calendars = principal.calendars()
             
+            # Get username from client
+            username = self.client.username if hasattr(self.client, 'username') else None
+            
             result = []
             for calendar in calendars:
+                cal_url = str(calendar.url)
+                color = self.get_calendar_color(cal_url)
+                
+                # always extract name from URL to get just the calendar name
+                # URL format: http://radicale:5232/admin/TestCal/ -> TestCal
+                from urllib.parse import urlparse
+                path = urlparse(cal_url).path.strip('/')
+                parts = [p for p in path.split('/') if p]
+                cal_name = parts[-1] if parts else calendar.name or "Unknown"
+                
+                # Try to get description from calendar object
+                cal_desc = getattr(calendar, 'description', None)
+                if not cal_desc:
+                    # Try to get description via PROPFIND
+                    cal_desc = ""
+                
                 result.append({
-                    "name": calendar.name,
-                    "url": str(calendar.url),
-                    "description": getattr(calendar, 'description', None) or "",
+                    "name": cal_name,
+                    "url": cal_url,
+                    "description": cal_desc or "",
+                    "color": color or "blue",
+                    "owner_username": username,
                 })
             return result
         except Exception as e:
@@ -81,21 +131,39 @@ class CalDAVClient:
             return []
     
     def get_calendar(self, calendar_name: str) -> Optional[caldav.Calendar]:
-        """Get a specific calendar by name."""
+        """Get a specific calendar by name or full path (username/calendar_name)."""
         if not self.is_connected():
             return None
         
         try:
             principal = self.get_principal()
-            calendar = principal.calendar(name=calendar_name)
-            return calendar
-        except caldav.lib.error.NotFoundError:
+            
+            # Try to get calendar directly by name
+            try:
+                calendar = principal.calendar(name=calendar_name)
+                return calendar
+            except caldav.lib.error.NotFoundError:
+                pass
+            
             # Try to find the calendar by listing all calendars
             calendars = principal.calendars()
             for cal in calendars:
                 # Check if the calendar name matches (case-insensitive, with/without user prefix)
                 if calendar_name.lower() in str(cal.url).lower() or cal.name.lower() == calendar_name.lower():
                     return cal
+            
+            # For Radicale: if calendar_name contains username/ prefix, try with just the name part
+            username = self.client.username if hasattr(self.client, 'username') else None
+            if username and '/' in calendar_name:
+                # Extract just the calendar name (last part after /)
+                simple_name = calendar_name.split('/')[-1]
+                if simple_name != calendar_name:  # Only if it's different
+                    try:
+                        calendar = principal.calendar(name=simple_name)
+                        return calendar
+                    except caldav.lib.error.NotFoundError:
+                        pass
+            
             return None
         except Exception as e:
             print(f"Error getting calendar '{calendar_name}': {e}")
@@ -116,16 +184,37 @@ class CalDAVClient:
             from requests.auth import HTTPBasicAuth
             
             # Clean up calendar name (replace spaces with underscores for URL)
+            # Remove username prefix if present (e.g., "admin/TestCal" -> "TestCal")
             clean_name = calendar_name.replace(' ', '_')
+            if username and clean_name.startswith(username + '/'):
+                clean_name = clean_name[len(username) + 1:]
             url = f"{self.radicale_url}/{username}/{clean_name}/"
+            
+            # Generate random color for calendar
+            import random
+            colors = ['blue', 'green', 'red', 'orange', 'purple', 'pink', 'yellow']
+            calendar_color = random.choice(colors)
+            
+            # Build XML body with calendar color (CalDAV standard)
+            xml_body = f'''<?xml version="1.0" encoding="utf-8" ?>
+<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav">
+    <D:set xmlns:D="DAV:">
+        <D:prop>
+            <D:displayname>{calendar_name}</D:displayname>
+            <C:calendar-description>{description or ''}</C:calendar-description>
+            <C:calendar-color>{calendar_color}</C:calendar-color>
+        </D:prop>
+    </D:set>
+</C:mkcalendar>'''
             
             response = requests.request(
                 'MKCALENDAR',
                 url,
                 auth=HTTPBasicAuth(username, password),
                 headers={
-                    'Content-Type': 'text/calendar',
-                }
+                    'Content-Type': 'application/xml; charset=utf-8',
+                },
+                data=xml_body
             )
             
             if response.status_code in (200, 201, 202, 204):
@@ -146,7 +235,21 @@ class CalDAVClient:
     
     def calendar_exists(self, calendar_name: str) -> bool:
         """Check if a calendar exists."""
-        return self.get_calendar(calendar_name) is not None
+        # Try with the full path first (username/calendar_name)
+        calendar = self.get_calendar(calendar_name)
+        if calendar:
+            return True
+        
+        # If calendar_name contains a username prefix, try without it
+        username = self.client.username if hasattr(self.client, 'username') else None
+        if username and calendar_name.startswith(username + '/'):
+            # Extract just the calendar name
+            calendar_name_only = calendar_name[len(username) + 1:]
+            calendar = self.get_calendar(calendar_name_only)
+            if calendar:
+                return True
+        
+        return False
     
     def delete_calendar(self, calendar_name: str) -> bool:
         """Delete a calendar."""
@@ -290,8 +393,11 @@ class CalDAVClient:
             if not event_id.startswith(calendar_url):
                 # Assume event_id is just the filename or path suffix
                 if not event_id.startswith('/'):
+                    # URL encode filename to handle special characters like @
+                    from urllib.parse import quote
+                    encoded_filename = quote(event_id, safe='')
                     # Just a filename, append to calendar URL
-                    event_url = f"{calendar_url}/{event_id}"
+                    event_url = f"{calendar_url}/{encoded_filename}"
                 else:
                     # Absolute path, use as is
                     event_url = event_id
@@ -404,33 +510,46 @@ class CalDAVClient:
             if not calendar:
                 return False
             
-            # Get the old event to preserve UID
-            old_event = self.get_event(calendar_name, event_id)
-            if not old_event:
+            # Build full event URL from event_id (filename only)
+            calendar_url = str(calendar.url).rstrip('/')
+            from urllib.parse import quote
+            encoded_event_id = quote(event_id, safe='')
+            if not event_id.startswith(calendar_url):
+                if not event_id.startswith('/'):
+                    event_url = f"{calendar_url}/{encoded_event_id}"
+                else:
+                    event_url = event_id
+            else:
+                event_url = event_id
+            
+            # Get event object to extract UID
+            old_event_obj = calendar.event_by_url(event_url)
+            if not old_event_obj:
                 return False
+            ic_comp = old_event_obj.icalendar_component
+            uid_obj = ic_comp.get('uid')
+            uid = str(uid_obj) if uid_obj else str(uuid.uuid4()) + '@niftycaldav'
             
             # Delete old event
-            calendar.delete_event(url=event_id)
+            old_event_obj.delete()
             
-            # Create new event with same UID if possible
-            uid = old_event.get('uid', str(uuid.uuid4()) + '@niftycaldav')
-            
+            # Create new event with same UID
             cal = icalendar.Calendar()
             cal.add('prodid', '-//NiftyCaldav//NiftyCaldav//EN')
             cal.add('version', '2.0')
             
-            event = icalendar.Event()
-            event.add('summary', vText(summary))
-            event.add('dtstart', start)
-            event.add('dtend', end)
-            event.add('uid', uid)
+            new_event = icalendar.Event()
+            new_event.add('summary', vText(summary))
+            new_event.add('dtstart', start)
+            new_event.add('dtend', end)
+            new_event.add('uid', uid)
             
             if description:
-                event.add('description', vText(description))
+                new_event.add('description', vText(description))
             if location:
-                event.add('location', vText(location))
+                new_event.add('location', vText(location))
             
-            cal.add_component(event)
+            cal.add_component(new_event)
             calendar.save_event(cal)
             
             return True
@@ -448,7 +567,23 @@ class CalDAVClient:
             if not calendar:
                 return False
             
-            calendar.delete_event(url=event_id)
+            # Build full event URL from event_id (filename only)
+            calendar_url = str(calendar.url).rstrip('/')
+            from urllib.parse import quote
+            encoded_event_id = quote(event_id, safe='')
+            if not event_id.startswith(calendar_url):
+                if not event_id.startswith('/'):
+                    event_url = f"{calendar_url}/{encoded_event_id}"
+                else:
+                    event_url = event_id
+            else:
+                event_url = event_id
+            
+            # Get event object and delete it
+            event_obj = calendar.event_by_url(event_url)
+            if not event_obj:
+                return False
+            event_obj.delete()
             return True
         except Exception as e:
             print(f"Error deleting event: {e}")
