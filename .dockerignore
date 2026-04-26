@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+.gitmodules
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node
+node_modules/
+.yarn/
+
+# Build outputs
+dist/
+build/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# API data (will be created by container)
+api-data/
+radicale-data/
+radicale-config/

@@ -1,0 +1,39 @@
+services:
+  radicale:
+    image: tomsquest/docker-radicale:latest
+    container_name: radicale
+    restart: unless-stopped
+    volumes:
+      - ./radicale-data:/var/www/radicale/data
+      - ./radicale-config:/var/www/radicale/config
+    ports:
+      - "5232:5232"
+    environment:
+      - RADICALE_AUTH_TYPE=htpasswd
+      - RADICALE_HTPASSWD_FILENAME=/var/www/radicale/config/users
+      - RADICALE_HTPASSWD_ENCRYPTION=bcrypt
+
+  api:
+    build: ./api
+    container_name: NiftyCaldav-api
+    restart: unless-stopped
+    ports:
+      - "8880:8000"
+    volumes:
+      - ./api-data:/data
+    depends_on:
+      - radicale
+    environment:
+      - RADICALE_URL=http://radicale:5232
+      - DATABASE_URL=sqlite:////data/mistral.db
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: NiftyCaldav-frontend
+    restart: unless-stopped
+    ports:
+      - "3330:3000"
+    depends_on:
+      - api
