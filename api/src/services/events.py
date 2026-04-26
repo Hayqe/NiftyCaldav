@@ -80,6 +80,7 @@ class EventService:
                 return EventInDB(
                     id=event_url,
                     summary=event.summary,
+                    title=event.summary,
                     start=event.start,
                     end=event.end,
                     description=event.description,
@@ -285,6 +286,7 @@ class EventService:
                 return EventInDB(
                     id=event_id,
                     summary=summary,
+                    title=summary,
                     start=start,
                     end=end,
                     description=description,

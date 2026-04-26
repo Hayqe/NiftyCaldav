@@ -58,7 +58,8 @@ export function CalendarProvider({ children }: CalendarProviderProps) {
           const parsed = JSON.parse(saved) as number[];
           const allIds = new Set(allCalendars.map(c => c.id));
           const filtered = new Set(parsed.filter(id => allIds.has(id)));
-          setActiveCalendars(filtered);
+          // If no active calendars were saved or all filtered out, show all by default
+          setActiveCalendars(filtered.size > 0 ? filtered : new Set(allCalendars.map(c => c.id)));
         } catch {
           // Fallback to all calendars
           setActiveCalendars(new Set(allCalendars.map(c => c.id)));
