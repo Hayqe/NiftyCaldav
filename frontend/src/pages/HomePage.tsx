@@ -316,7 +316,7 @@ export default function HomePage() {
                         }}
                       >
                         <div className="flex items-center gap-1">
-                          <span className="text-white">{startTime} {event.title}</span>
+                          <span className="text-white font-bold">{startTime} {event.title}</span>
                           {event.location && <MapPin className="w-3 h-3 text-white/80" />}
                         </div>
                       </div>
@@ -483,7 +483,7 @@ export default function HomePage() {
                         }}
                       >
                         <div className="flex items-center gap-1">
-                          <span className="text-white truncate">{format(eventStart, 'HH:mm')} {event.title}</span>
+                          <span className="text-white truncate font-bold">{format(eventStart, 'HH:mm')} {event.title}</span>
                           {event.location && <MapPin className="w-3 h-3 text-white/80 flex-shrink-0" />}
                         </div>
                       </div>
@@ -617,7 +617,7 @@ export default function HomePage() {
                       handleEditEvent(event);
                     }}
                   >
-                    <span className="text-white truncate block">{event.title}</span>
+                    <span className="text-white truncate block font-bold">{event.title}</span>
                     <span className="text-white/80 text-xs">{format(eventStart, 'HH:mm')}</span>
                     {event.location && (
                       <div className="flex items-center gap-1 text-white/80 text-xs">
@@ -670,7 +670,7 @@ export default function HomePage() {
                       />
                     </div>
                     <div className="flex-1">
-                      <h3 className="font-semibold text-gray-900 truncate">{event.title}</h3>
+                      <h3 className="font-bold text-gray-900 truncate">{event.title}</h3>
                       <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
                         <span>
                           {format(parseISO(event.start), 'EEEE d MMMM yyyy', { locale: nl })}
