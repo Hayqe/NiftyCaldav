@@ -46,3 +46,19 @@ class CalendarShareInDB(CalendarShareBase):
 
 class CalendarWithShares(CalendarInDB):
     shares: List[CalendarShareInDB] = []
+
+
+# Radicale-only calendar schema (no database ID)
+class CalendarRadicale(BaseModel):
+    name: str
+    url: str
+    description: Optional[str] = None
+    color: Optional[str] = None
+    owner_username: Optional[str] = None  # Extracted from URL
+
+    class Config:
+        from_attributes = True
+
+
+class CalendarRadicaleWithShares(CalendarRadicale):
+    shares: List[CalendarShareInDB] = []

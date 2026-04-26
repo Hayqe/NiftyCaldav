@@ -1,5 +1,6 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { LoginCredentials, User, Calendar, Event, CalendarShare, UserSettings, ApiResponse, PaginatedResponse } from '@/types';
+import { normalizeEventId } from '@/utils/helpers';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -143,7 +144,7 @@ export const eventsApi = {
     api.get('/events/', { params: { calendar_id: calendarId, start, end } }),
   
   getById: (calendarId: number, eventId: string): Promise<ApiResponse<Event>> =>
-    api.get(`/events/${eventId}/`, { params: { calendar_id: calendarId } }),
+    api.get(`/events/${normalizeEventId(eventId)}/`, { params: { calendar_id: calendarId } }),
   
   create: (calendarId: number, event: Omit<Event, 'id' | 'created_at' | 'updated_at'>): Promise<ApiResponse<Event>> => {
     // Map frontend Event type (with title) to backend EventCreate schema (with summary)
@@ -161,15 +162,15 @@ export const eventsApi = {
     // Map frontend Event type (with title) to backend EventUpdate schema (with summary)
     const backendEvent: Record<string, any> = {};
     if (event.title !== undefined) backendEvent.summary = event.title;
-    if (event.description !== undefined) backendEvent.description = event.description;
     if (event.start !== undefined) backendEvent.start = event.start;
     if (event.end !== undefined) backendEvent.end = event.end;
+    if (event.description !== undefined) backendEvent.description = event.description;
     if (event.location !== undefined) backendEvent.location = event.location;
-    return api.put(`/events/${eventId}/`, backendEvent, { params: { calendar_id: calendarId } });
+    return api.put(`/events/${normalizeEventId(eventId)}/`, backendEvent, { params: { calendar_id: calendarId } });
   },
   
   delete: (calendarId: number, eventId: string): Promise<ApiResponse<null>> =>
-    api.delete(`/events/${eventId}/`, { params: { calendar_id: calendarId } }),
+    api.delete(`/events/${normalizeEventId(eventId)}/`, { params: { calendar_id: calendarId } }),
   
   // Get events for date range across all calendars
   getEventsForDateRange: (start: string, end: string): Promise<ApiResponse<Event[]>> =>
