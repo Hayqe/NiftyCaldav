@@ -81,7 +81,15 @@ class CalDAVClient:
             
             if response.status_code == 207:
                 # Parse color from XML response
-                match = re.search(r'<C:calendar-color>([^<]+)</C:calendar-color>', response.text)
+                # Try both apple and caldav namespaces for color
+                match = re.search(r'<(?:C|ical):calendar-color>([^<]+)</(?:C|ical):calendar-color>', response.text)
+                if not match:
+                    # Fallback to any calendar-color tag
+                    match = re.search(r'<[^:]+:calendar-color>([^<]+)</[^:]+:calendar-color>', response.text)
+                if not match:
+                    # Try without namespace
+                    match = re.search(r'<calendar-color>([^<]+)</calendar-color>', response.text)
+                    
                 if match:
                     return match.group(1)
         except Exception as e:
@@ -103,20 +111,37 @@ class CalDAVClient:
             result = []
             for calendar in calendars:
                 cal_url = str(calendar.url)
+                
+                # Fetch color
                 color = self.get_calendar_color(cal_url)
                 
-                # always extract name from URL to get just the calendar name
-                # URL format: http://radicale:5232/admin/TestCal/ -> TestCal
-                from urllib.parse import urlparse
-                path = urlparse(cal_url).path.strip('/')
-                parts = [p for p in path.split('/') if p]
-                cal_name = parts[-1] if parts else calendar.name or "Unknown"
+                # Try to get displayname property properly
+                # calendar.name in caldav library often returns DisplayName if available
+                cal_name = None
+                try:
+                    cal_name = calendar.get_property(caldav.dav.DisplayName())
+                except:
+                    pass
                 
-                # Try to get description from calendar object
-                cal_desc = getattr(calendar, 'description', None)
+                if not cal_name:
+                    cal_name = calendar.name
+                
+                # If still no name, extract from URL
+                if not cal_name or cal_name == cal_url:
+                    from urllib.parse import urlparse
+                    path = urlparse(cal_url).path.strip('/')
+                    parts = [p for p in path.split('/') if p]
+                    cal_name = parts[-1] if parts else "Unknown"
+                
+                # Try to get description property properly
+                cal_desc = ""
+                try:
+                    cal_desc = calendar.get_property(caldav.dav.CalendarDescription())
+                except:
+                    pass
+                
                 if not cal_desc:
-                    # Try to get description via PROPFIND
-                    cal_desc = ""
+                    cal_desc = getattr(calendar, 'description', "")
                 
                 result.append({
                     "name": cal_name,
@@ -252,18 +277,48 @@ class CalDAVClient:
         return False
     
     def delete_calendar(self, calendar_name: str) -> bool:
-        """Delete a calendar."""
+        """Delete a calendar from Radicale."""
         if not self.is_connected():
             return False
         
         try:
             calendar = self.get_calendar(calendar_name)
-            if calendar:
+            if calendar and hasattr(calendar, 'url') and calendar.url:
+                # The calendar.delete() method should work
+                # But sometimes the URL is None, so we need to use the URL from get_calendar
                 calendar.delete()
                 return True
+            
+            # Fallback: try with raw HTTP DELETE to the calendar URL
+            # Build the calendar URL manually
+            username = self.client.username if hasattr(self.client, 'username') else None
+            if username:
+                # Try different URL formats
+                import requests
+                from requests.auth import HTTPBasicAuth
+                
+                urls_to_try = [
+                    f"{self.radicale_url}/{username}/{calendar_name}/",
+                    f"{self.radicale_url}/{calendar_name}/",
+                ]
+                
+                for try_url in urls_to_try:
+                    try:
+                        response = requests.request(
+                            'DELETE',
+                            try_url,
+                            auth=HTTPBasicAuth(username, self.client.password if hasattr(self.client, 'password') else 'admin')
+                        )
+                        if response.status_code in (200, 204, 202, 404):
+                            return True
+                    except Exception:
+                        continue
+            
             return False
         except Exception as e:
             print(f"Error deleting calendar '{calendar_name}': {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_events(self, calendar_name: str, start: datetime = None, end: datetime = None) -> List[Dict[str, Any]]:

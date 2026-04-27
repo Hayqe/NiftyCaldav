@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Users, Settings, LogOut, X, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '@/hooks';
+import { useAuth, useCreateCalendar } from '@/hooks';
 import { useCalendarContext } from '@/context/CalendarContext';
 import { cn, CALENDAR_COLORS } from '@/utils';
 import type { Calendar } from '@/types';
@@ -14,6 +14,7 @@ export default function Sidebar() {
   const [newCalendarColor, setNewCalendarColor] = useState('blue');
   
   const { logout, user } = useAuth();
+  const { mutateAsync: createCalendar, isPending: isCreating } = useCreateCalendar();
   const {
     myCalendars,
     sharedCalendars,
@@ -25,10 +26,22 @@ export default function Sidebar() {
   const handleCreateCalendar = async () => {
     if (!newCalendarName.trim()) return;
     
-    // TODO: Call create calendar API
-    // For now, just close the form
-    setIsCreatingCalendar(false);
-    setNewCalendarName('');
+    try {
+      // Call create calendar API with selected color
+      await createCalendar({
+        name: newCalendarName,
+        color: newCalendarColor,
+        description: ''
+      });
+      
+      // Close the form and reset
+      setIsCreatingCalendar(false);
+      setNewCalendarName('');
+      setNewCalendarColor('blue');
+    } catch (error) {
+      console.error('Failed to create calendar:', error);
+      // Could add error toast here
+    }
   };
 
   const handleLogout = async () => {
@@ -284,9 +297,9 @@ export default function Sidebar() {
                 <button
                   onClick={handleCreateCalendar}
                   className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors disabled:opacity-50"
-                  disabled={!newCalendarName.trim()}
+                  disabled={!newCalendarName.trim() || isCreating}
                 >
-                  Aanmaken
+                  {isCreating ? 'Aanmaken...' : 'Aanmaken'}
                 </button>
               </div>
             </div>

@@ -24,9 +24,16 @@ async def create_calendar(
     Create a new calendar directly in Radicale (no database).
     Returns calendar info from Radicale.
     """
+    import hashlib
     username = token_payload.get("username", "admin")
     try:
         result = CalendarService.create_calendar_radicale(calendar, username)
+        
+        # Add virtual ID from URL hash
+        url = result.get("url")
+        url_hash = int(hashlib.md5(url.encode()).hexdigest()[:8], 16) % (2**31)
+        result["id"] = url_hash
+        
         return result
     except Exception as e:
         raise HTTPException(
@@ -54,6 +61,10 @@ async def read_calendars(
     # Get all calendars for this user from Radicale
     raw_calendars = client.get_calendars()
     
+    # Generate virtual IDs from calendar URLs for frontend compatibility
+    import hashlib
+    from datetime import datetime
+    
     result = []
     for cal_info in raw_calendars:
         cal_name = cal_info.get('name')
@@ -62,94 +73,161 @@ async def read_calendars(
         cal_color = cal_info.get('color', 'blue')
         cal_owner = cal_info.get('owner_username')
         
+        # Generate a deterministic ID from the URL
+        url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+        
         result.append(CalendarRadicaleWithShares(
+            id=url_hash,
             name=cal_name,
             url=cal_url,
             description=cal_desc,
             color=cal_color,
+            owner_id=1,  # Default for now
             owner_username=cal_owner,
-            shares=[]  # Shares will be added in a separate step
+            created_at=None,
+            updated_at=None,
+            shares=[]
         ))
     
     return result
 
 
-@router.get("/{calendar_id}", response_model=CalendarWithShares, summary="Get calendar by ID")
+@router.get("/{calendar_id}", response_model=CalendarRadicaleWithShares, summary="Get calendar by ID (Radicale)")
 async def read_calendar(
     calendar_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    token_payload: dict = Depends(get_current_user_from_token)
 ):
     """
-    Get calendar by ID. User must own the calendar or it must be shared with them.
-    Admin can access any calendar.
+    Get calendar by ID (hash from URL) directly from Radicale.
     """
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
+    username = token_payload.get("username", "admin")
+    client = CalDAVClient()
+    if not client.connect(username, "admin"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to connect to CalDAV"
         )
     
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        # Check if shared
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_access = any(share.user_id == current_user.id for share in shares)
-        if not has_access:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No access to this calendar"
+    # Get all calendars and find one with matching ID (hash)
+    import hashlib
+    raw_calendars = client.get_calendars()
+    
+    for cal_info in raw_calendars:
+        cal_url = cal_info.get('url')
+        url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+        if url_hash == calendar_id:
+            cal_name = cal_info.get('name')
+            cal_desc = cal_info.get('description')
+            cal_color = cal_info.get('color', 'blue')
+            
+            return CalendarRadicaleWithShares(
+                id=calendar_id,
+                name=cal_name,
+                url=cal_url,
+                description=cal_desc,
+                color=cal_color,
+                owner_id=1,
+                owner_username=username,
+                created_at=None,
+                updated_at=None,
+                shares=[]
             )
     
-    shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-    return CalendarWithShares.model_validate({
-        "id": calendar.id,
-        "name": calendar.name,
-        "description": calendar.description,
-        "color": calendar.color,
-        "owner_id": calendar.owner_id,
-        "created_at": calendar.created_at,
-        "updated_at": calendar.updated_at,
-        "shares": shares
-    })
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Calendar not found"
+    )
 
 
-@router.put("/{calendar_id}", response_model=CalendarInDB, summary="Update calendar")
+@router.put("/{calendar_id}", response_model=CalendarRadicale, summary="Update calendar (Radicale)")
 async def update_calendar(
     calendar_id: int,
     calendar: CalendarUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    token_payload: dict = Depends(get_current_user_from_token)
 ):
     """
-    Update calendar. User must be owner or admin.
+    Update calendar directly in Radicale.
+    Currently limited to description updates.
     """
-    updated_calendar = CalendarService.update_calendar(db, calendar_id, calendar, current_user.id)
-    if not updated_calendar:
+    username = token_payload.get("username", "admin")
+    client = CalDAVClient()
+    if not client.connect(username, "admin"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found or no permission"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to connect to CalDAV"
         )
-    return updated_calendar
+    
+    # Find calendar by ID (hash)
+    import hashlib
+    raw_calendars = client.get_calendars()
+    
+    for cal_info in raw_calendars:
+        cal_url = cal_info.get('url')
+        url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+        if url_hash == calendar_id:
+            # Update via CalDAV PROPPATCH (not fully implemented in caldav library)
+            # For now, just return the calendar info
+            cal_name = cal_info.get('name')
+            
+            # Note: Full calendar update via CalDAV is complex
+            # This is a placeholder for now
+            raise HTTPException(
+                status_code=status.HTTP_501_NOT_IMPLEMENTED,
+                detail="Calendar update via Radicale not yet implemented"
+            )
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Calendar not found"
+    )
 
 
-@router.delete("/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete calendar")
+@router.delete("/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete calendar (Radicale)")
 async def delete_calendar(
     calendar_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    token_payload: dict = Depends(get_current_user_from_token)
 ):
     """
-    Delete calendar. User must be owner or admin.
+    Delete calendar directly from Radicale.
     """
-    success = CalendarService.delete_calendar(db, calendar_id, current_user.id)
-    if not success:
+    username = token_payload.get("username", "admin")
+    client = CalDAVClient()
+    if not client.connect(username, "admin"):
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found or no permission"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Failed to connect to CalDAV"
         )
-    return None
+    
+    # Find calendar by ID (hash) and delete
+    import hashlib
+    
+    raw_calendars = client.get_calendars()
+    
+    for cal_info in raw_calendars:
+        cal_url = cal_info.get('url')
+        cal_name = cal_info.get('name')
+        url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+        if url_hash == calendar_id:
+            # Use the caldav client delete method
+            # Extract just the calendar name (last part of URL)
+            if '/' in cal_url:
+                parts = cal_url.rstrip('/').split('/')
+                cal_name_only = parts[-1] if parts else cal_name
+            else:
+                cal_name_only = cal_name
+            
+            if client.delete_calendar(cal_name_only):
+                return None
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"Failed to delete calendar from Radicale"
+                )
+    
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Calendar not found"
+    )
 
 
 # Calendar Shares

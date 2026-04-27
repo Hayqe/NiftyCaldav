@@ -1,6 +1,5 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import type { LoginCredentials, User, Calendar, Event, CalendarShare, UserSettings, ApiResponse, PaginatedResponse } from '@/types';
-import { normalizeEventId } from '@/utils/helpers';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -144,7 +143,7 @@ export const eventsApi = {
     api.get('/events/', { params: { calendar_id: calendarId, start, end } }),
   
   getById: (calendarId: number, eventId: string): Promise<ApiResponse<Event>> =>
-    api.get(`/events/${normalizeEventId(eventId)}/`, { params: { calendar_id: calendarId } }),
+    api.get('/events/get', { params: { calendar_id: calendarId, event_id: eventId } }),
   
   create: (calendarId: number, event: Omit<Event, 'id' | 'created_at' | 'updated_at'>): Promise<ApiResponse<Event>> => {
     // Map frontend Event type (with title) to backend EventCreate schema (with summary)
@@ -166,11 +165,11 @@ export const eventsApi = {
     if (event.end !== undefined) backendEvent.end = event.end;
     if (event.description !== undefined) backendEvent.description = event.description;
     if (event.location !== undefined) backendEvent.location = event.location;
-    return api.put(`/events/${normalizeEventId(eventId)}/`, backendEvent, { params: { calendar_id: calendarId } });
+    return api.put('/events/update', backendEvent, { params: { calendar_id: calendarId, event_id: eventId } });
   },
   
   delete: (calendarId: number, eventId: string): Promise<ApiResponse<null>> =>
-    api.delete(`/events/${normalizeEventId(eventId)}/`, { params: { calendar_id: calendarId } }),
+    api.delete('/events/delete', { params: { calendar_id: calendarId, event_id: eventId } }),
   
   // Get events for date range across all calendars
   getEventsForDateRange: (start: string, end: string): Promise<ApiResponse<Event[]>> =>
@@ -191,7 +190,8 @@ export const icsApi = {
   import: (calendarId: number, file: File): Promise<ApiResponse<{ imported: number; errors: number }>> => {
     const formData = new FormData();
     formData.append('file', file);
-    return api.post(`/calendars/${calendarId}/ics-import/`, formData, {
+    return api.post('/ics/import', formData, {
+      params: { calendar_id: calendarId },
       headers: { 'Content-Type': 'multipart/form-data' },
     });
   },

@@ -42,7 +42,13 @@ class CalendarService:
         if not client.create_calendar(calendar.name, calendar.description):
             raise Exception(f"Failed to create calendar '{calendar.name}' in Radicale")
         
-        # Return calendar info from Radicale
+        # Return fresh calendar info from Radicale
+        calendars = client.get_calendars()
+        for cal in calendars:
+            if cal['name'] == calendar.name or cal['url'].endswith(f"/{calendar.name}/"):
+                return cal
+                
+        # Fallback if for some reason listing fails right after creation
         cal = client.get_calendar(calendar.name)
         cal_url = str(cal.url) if cal else f"{client.radicale_url}/{username}/{calendar.name}/"
         return {

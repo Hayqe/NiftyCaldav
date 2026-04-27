@@ -6,7 +6,7 @@ export function useMyCalendars() {
   return useQuery({
     queryKey: ['calendars', 'my'],
     queryFn: calendarsApi.getMyCalendars,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000,
   });
 }
 
@@ -14,7 +14,7 @@ export function useSharedCalendars() {
   return useQuery({
     queryKey: ['calendars', 'shared'],
     queryFn: calendarsApi.getSharedCalendars,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000,
   });
 }
 
@@ -22,7 +22,7 @@ export function useAllCalendars() {
   return useQuery({
     queryKey: ['calendars', 'all'],
     queryFn: calendarsApi.getAll,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000,
   });
 }
 
@@ -31,7 +31,7 @@ export function useCalendar(id: number | null) {
     queryKey: ['calendars', id],
     queryFn: () => calendarsApi.getById(id!),
     enabled: !!id,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000,
   });
 }
 
@@ -40,7 +40,7 @@ export function useCalendarShares(calendarId: number | null) {
     queryKey: ['calendars', calendarId, 'shares'],
     queryFn: () => sharesApi.getCalendarShares(calendarId!),
     enabled: !!calendarId,
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1000,
   });
 }
 

@@ -23,7 +23,7 @@ export function useEvents(calendarIds: number[], dateRange: { start: Date; end: 
       const results = await Promise.all(promises);
       return results.flatMap(r => r.data);
     },
-    staleTime: 1000 * 60, // 1 minute
+    staleTime: 5000, // 5 seconds
   });
 }
 

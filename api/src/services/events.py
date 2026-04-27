@@ -43,6 +43,39 @@ class EventService:
         return None
     
     @staticmethod
+    def _resolve_calendar_path(db: Session, client: CalDAVClient, user_id: int, calendar_id: int) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Resolve calendar path (username/name) and display name from either DB ID or virtual ID (hash).
+        Returns (calendar_path, calendar_name).
+        """
+        import hashlib
+        
+        # 1. Try database first
+        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
+        if calendar:
+            user = UserService.get_user(db, calendar.owner_id)
+            username = user.username if user else 'admin'
+            return f"{username}/{calendar.name}", calendar.name
+            
+        # 2. Try Radicale for virtual ID
+        user = UserService.get_user(db, user_id)
+        if not user:
+            return None, None
+            
+        # Get all calendars from Radicale and check hashes
+        raw_calendars = client.get_calendars()
+        for cal_info in raw_calendars:
+            cal_url = cal_info.get('url')
+            url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+            
+            if url_hash == calendar_id:
+                cal_name = cal_info.get('name')
+                cal_owner = cal_info.get('owner_username') or user.username
+                return f"{cal_owner}/{cal_name}", cal_name
+                
+        return None, None
+
+    @staticmethod
     def create_event(
         db: Session, 
         event: EventCreate, 
@@ -56,17 +89,10 @@ class EventService:
         if not client:
             return None
         
-        calendar_name = EventService._get_calendar_name(db, calendar_id)
-        if not calendar_name:
+        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        if not calendar_path:
             return None
         
-        # Get username from client for Radicale calendar path
-        username = client.client.username if hasattr(client.client, 'username') else 'admin'
-        # For Radicale, calendar path is username/calendar_name
-        calendar_path = f"{username}/{calendar_name}"
-        
-        # Also try with just "admin" password for demo
-        # First try with our method
         try:
             # First ensure calendar exists in CalDAV
             if not client.calendar_exists(calendar_path):
@@ -115,20 +141,9 @@ class EventService:
         if not client:
             return None
         
-        # Get username for Radicale calendar path
-        user = UserService.get_user(db, user_id)
-        username = user.username if user else 'admin'
-        
-        calendar_name = EventService._get_calendar_name(db, calendar_id)
-        if not calendar_name:
+        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        if not calendar_path:
             return None
-        
-        # For Radicale, calendar path is username/calendar_name
-        calendar_path = f"{username}/{calendar_name}"
-        
-        # Ensure calendar exists in CalDAV
-        if not client.calendar_exists(calendar_path):
-            client.create_calendar(calendar_path)
         
         try:
             event_data = client.get_event(calendar_path, event_id)
@@ -165,84 +180,61 @@ class EventService:
         List events from user's calendars via CalDAV.
         If calendar_id is specified, only get events from that calendar.
         """
+        import hashlib
         user = UserService.get_user(db, user_id)
-        print(f"DEBUG EventService.list_events: user_id={user_id}, user={user.username if user else None}, calendar_id={calendar_id}")
         if not user:
-            print(f"DEBUG: User not found for user_id={user_id}")
             return []
         
         client = CalDAVClient()
-        # Connect to CalDAV server with user's credentials
-        # Note: Radicale uses htpasswd with username/password from environment
-        # For demo, we use admin/admin for all users
         if not client.connect(user.username, "admin"):
-            print(f"DEBUG: Failed to connect to CalDAV for user {user.username}")
             return []
-        
-        print(f"DEBUG: Connected to CalDAV as {user.username}")
         
         try:
             # Build a map of calendar_path to calendar_id for proper ID assignment
             calendar_id_map = {}
-            calendar_names = []
+            calendar_name_map = {}
+            calendar_paths = []
             
             if calendar_id:
-                # Single calendar case
-                calendar_name = EventService._get_calendar_name(db, calendar_id)
-                print(f"DEBUG: calendar_id={calendar_id}, calendar_name={calendar_name}")
-                if not calendar_name:
-                    print(f"DEBUG: Calendar not found for calendar_id={calendar_id}")
+                # Resolve the specific calendar
+                calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+                if not calendar_path:
                     return []
-                # For Radicale, calendar path is username/calendar_name
-                calendar_path = f"{user.username}/{calendar_name}"
-                print(f"DEBUG: Using calendar_path={calendar_path}")
-                calendar_names = [calendar_path]
+                calendar_paths = [calendar_path]
                 calendar_id_map[calendar_path] = calendar_id
-                
-                # Ensure calendar exists in CalDAV (pass just the calendar name, not the full path)
-                if not client.calendar_exists(calendar_name):
-                    print(f"DEBUG: Creating calendar {calendar_name} in CalDAV")
-                    client.create_calendar(calendar_name)
+                calendar_name_map[calendar_path] = calendar_name
             else:
-                # All calendars case - get own and shared
-                from ..models import Calendar, CalendarShare
-                own_calendars = db.query(Calendar).filter(Calendar.owner_id == user_id).all()
-                for c in own_calendars:
-                    calendar_path = f"{user.username}/{c.name}"
-                    calendar_names.append(calendar_path)
-                    calendar_id_map[calendar_path] = c.id
-                    # Ensure calendar exists in CalDAV
-                    if not client.calendar_exists(calendar_path):
-                        print(f"DEBUG: Creating calendar {calendar_path} in CalDAV")
-                        client.create_calendar(calendar_path)
-                
-                # Shared calendars
-                shares = db.query(CalendarShare).filter(CalendarShare.user_id == user_id).all()
-                for share in shares:
-                    cal_path = f"{share.calendar.owner.username}/{share.calendar.name}"
-                    if cal_path not in calendar_id_map:
-                        calendar_names.append(cal_path)
-                        calendar_id_map[cal_path] = share.calendar.id
-                        # Ensure calendar exists in CalDAV
-                        if not client.calendar_exists(cal_path):
-                            print(f"DEBUG: Creating calendar {cal_path} in CalDAV")
-                            client.create_calendar(cal_path)
-            
-            if not calendar_names:
-                print(f"DEBUG: No calendar names found")
-                return []
+                # All calendars - get from Radicale directly
+                raw_calendars = client.get_calendars()
+                for cal_info in raw_calendars:
+                    cal_name = cal_info.get('name')
+                    cal_url = cal_info.get('url')
+                    cal_owner = cal_info.get('owner_username') or user.username
+                    
+                    cal_path = f"{cal_owner}/{cal_name}"
+                    # Check if it's in DB for proper ID
+                    db_cal = db.query(Calendar).filter(Calendar.name == cal_name).first()
+                    if db_cal:
+                        cal_id = db_cal.id
+                    else:
+                        # Generate virtual ID
+                        cal_id = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+                        
+                    calendar_paths.append(cal_path)
+                    calendar_id_map[cal_path] = cal_id
+                    calendar_name_map[cal_path] = cal_name
             
             all_events = []
-            for cal_name in calendar_names:
+            for cal_path in calendar_paths:
                 try:
-                    events = client.get_events(cal_name, start, end)
-                    cal_id = calendar_id_map.get(cal_name)
-                    print(f"DEBUG: Processing {len(events)} events from calendar {cal_name}, calendar_id={cal_id}")
+                    events = client.get_events(cal_path, start, end)
+                    cal_id = calendar_id_map.get(cal_path)
+                    cal_name = calendar_name_map.get(cal_path)
                     for event_data in events:
                         event = EventInDB(
                             id=event_data.get('id'),
                             summary=event_data.get('summary', 'Unnamed Event'),
-                            title=event_data.get('summary', 'Unnamed Event'),  # Frontend uses 'title'
+                            title=event_data.get('summary', 'Unnamed Event'),
                             start=event_data.get('start'),
                             end=event_data.get('end'),
                             description=event_data.get('description'),
@@ -256,7 +248,7 @@ class EventService:
                         )
                         all_events.append(event)
                 except Exception as e:
-                    print(f"Error getting events from calendar '{cal_name}': {e}")
+                    print(f"Error getting events from calendar '{cal_path}': {e}")
                     continue
             
             # Sort by start date
@@ -265,8 +257,6 @@ class EventService:
             
         except Exception as e:
             print(f"Error listing events: {e}")
-            import traceback
-            traceback.print_exc()
             return []
     
     @staticmethod
@@ -284,20 +274,9 @@ class EventService:
         if not client:
             return None
         
-        # Get username for Radicale calendar path
-        user = UserService.get_user(db, user_id)
-        username = user.username if user else 'admin'
-        
-        calendar_name = EventService._get_calendar_name(db, calendar_id)
-        if not calendar_name:
+        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        if not calendar_path:
             return None
-        
-        # For Radicale, calendar path is username/calendar_name
-        calendar_path = f"{username}/{calendar_name}"
-        
-        # Ensure calendar exists in CalDAV
-        if not client.calendar_exists(calendar_path):
-            client.create_calendar(calendar_path)
         
         try:
             # Get old event to preserve any missing fields
@@ -312,8 +291,12 @@ class EventService:
             description = event.description if event.description is not None else old_event.get('description')
             location = event.location if event.location is not None else old_event.get('location')
             
+            # We need just the calendar name for client.update_event
+            # which extracts the name from calendar_path if it has /
+            cal_name_only = calendar_path.split('/')[-1] if '/' in calendar_path else calendar_path
+
             success = client.update_event(
-                calendar_name=calendar_name,
+                calendar_name=cal_name_only,
                 event_id=event_id,
                 summary=summary,
                 start=start,
@@ -356,20 +339,9 @@ class EventService:
         if not client:
             return False
         
-        # Get username for Radicale calendar path
-        user = UserService.get_user(db, user_id)
-        username = user.username if user else 'admin'
-        
-        calendar_name = EventService._get_calendar_name(db, calendar_id)
-        if not calendar_name:
+        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        if not calendar_path:
             return False
-        
-        # For Radicale, calendar path is username/calendar_name
-        calendar_path = f"{username}/{calendar_name}"
-        
-        # Ensure calendar exists in CalDAV
-        if not client.calendar_exists(calendar_path):
-            client.create_calendar(calendar_path)
         
         try:
             return client.delete_event(calendar_path, event_id)
