@@ -363,7 +363,7 @@ export default function HomePage() {
                 const timeSlots = [];
                 for (let hour = 0; hour < 24; hour++) {
                   timeSlots.push(
-                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '80px' }}>
+                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '60px' }}>
                       {hour.toString().padStart(2, '0')}:00
                     </div>
                   );
@@ -387,7 +387,7 @@ export default function HomePage() {
                 <div 
                   key={dayIndex} 
                   className={cn(
-                    "relative border-b border-gray-200 min-h-[1920px]"
+                    "relative border-b border-gray-200 min-h-[1440px]"
                   )} 
                   style={
                     settings?.data?.highlight_weekend && isWeekend
@@ -397,7 +397,7 @@ export default function HomePage() {
                   onClick={() => handleDateClick(day)}
                 >                  {/* Horizontal hour lines */}
                   {Array.from({ length: 24 }).map((_, i) => (
-                    <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 80}px`, height: '80px' }} />
+                    <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 60}px`, height: '60px' }} />
                   ))}
 
                   {(() => {
@@ -469,8 +469,8 @@ export default function HomePage() {
                         }
 
                         const color = getCalendarColor(event.calendar_id);
-                        const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 80;
-                        const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 80, 24);
+                        const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 60;
+                        const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 60, 30);
 
                         return (
                           <div
@@ -532,7 +532,7 @@ export default function HomePage() {
                 const timeSlots = [];
                 for (let hour = 0; hour < 24; hour++) {
                   timeSlots.push(
-                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '80px' }}>
+                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '60px' }}>
                       {hour.toString().padStart(2, '0')}:00
                     </div>
                   );
@@ -543,7 +543,7 @@ export default function HomePage() {
             
             {/* Events column with dynamic lanes */}
             <div 
-              className="relative min-h-[1920px]" 
+              className="relative min-h-[1440px]" 
               style={
                 settings?.data?.highlight_weekend && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
                   ? { backgroundColor: '#FEF9C3' }
@@ -553,7 +553,7 @@ export default function HomePage() {
             >
               {/* Horizontal hour lines */}
               {Array.from({ length: 24 }).map((_, i) => (
-                <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 80}px`, height: '80px' }} />
+                <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 60}px`, height: '60px' }} />
               ))}
 
               {(() => {
@@ -633,8 +633,8 @@ export default function HomePage() {
                     }
 
                     const color = getCalendarColor(event.calendar_id);
-                    const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 80;
-                    const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 80, 32);
+                    const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 60;
+                    const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 60, 30);
 
                     return (
                       <div

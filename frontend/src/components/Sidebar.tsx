@@ -8,14 +8,18 @@ import Logo from './Logo';
 import LoadingSpinner from './LoadingSpinner';
 import SettingsModal from './SettingsModal';
 
-export default function Sidebar() {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+interface SidebarProps {
+  isCollapsed: boolean;
+  setIsCollapsed: (val: boolean) => void;
+}
+
+export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
   const [isCreatingCalendar, setIsCreatingCalendar] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
   const [newCalendarColor, setNewCalendarColor] = useState('blue');
   
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const { mutateAsync: createCalendar, isPending: isCreating } = useCreateCalendar();
   const {
     myCalendars,
@@ -48,7 +52,7 @@ export default function Sidebar() {
 
   if (isCollapsed) {
     return (
-      <aside className="fixed left-0 top-0 z-40 h-screen w-16 bg-white border-r border-gray-200 flex flex-col">
+      <aside className="fixed left-0 top-0 z-40 h-screen w-16 bg-[#1a1a1a] border-r border-gray-800 flex flex-col transition-all duration-300">
         <div className="p-4">
           <Logo className="w-6 h-6" />
         </div>
@@ -63,7 +67,10 @@ export default function Sidebar() {
               return (
                 <div
                   key={calendar.id}
-                  className="w-10 h-10 rounded-lg cursor-pointer transition-all hover:scale-105 flex items-center justify-center"
+                  className={cn(
+                    "w-10 h-10 rounded-lg cursor-pointer transition-all hover:scale-105 flex items-center justify-center",
+                    !isCalendarActive(calendar.id) && "opacity-40"
+                  )}
                   style={{ backgroundColor: colorHex }}
                   onClick={() => toggleCalendar(calendar.id)}
                 >
@@ -80,9 +87,9 @@ export default function Sidebar() {
         <div className="p-2">
           <button
             onClick={() => setIsCollapsed(false)}
-            className="w-full p-2 rounded-lg hover:bg-gray-100 transition-colors"
+            className="w-full p-2 rounded-lg hover:bg-white/10 transition-colors"
           >
-            <ChevronRight className="w-4 h-4 mx-auto text-gray-500" />
+            <ChevronRight className="w-4 h-4 mx-auto text-gray-400" />
           </button>
         </div>
       </aside>
@@ -91,7 +98,7 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-sidebar text-[#f9f8f6] border-r border-gray-800 flex flex-col">
+      <aside className="fixed left-0 top-0 z-40 h-screen w-64 bg-[#1a1a1a] text-[#f9f8f6] border-r border-gray-800 flex flex-col transition-all duration-300">
         <div className="p-6 border-b border-gray-800">
           <div className="flex items-center gap-4">
             <Logo className="w-10 h-10" />
@@ -141,7 +148,6 @@ export default function Sidebar() {
                         <EyeOff className="w-4 h-4 opacity-50" />
                       )}
                     </div>
-
                   );
                 })}
               </div>
@@ -169,7 +175,6 @@ export default function Sidebar() {
                     <div className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20" style={{ backgroundColor: colorHex }} />
                     <span className="flex-1 text-sm truncate">{calendar.name}</span>
                   </div>
-
                 );
               })}
             </div>
@@ -195,7 +200,7 @@ export default function Sidebar() {
 
         <button
           onClick={() => setIsCollapsed(true)}
-          className="absolute top-1/2 -translate-y-1/2 -right-3 bg-sidebar border border-gray-800 rounded-full w-6 h-6 flex items-center justify-center shadow-sm hover:bg-gray-800 text-gray-300"
+          className="absolute top-1/2 -translate-y-1/2 -right-3 bg-[#1a1a1a] border border-gray-800 rounded-full w-6 h-6 flex items-center justify-center shadow-sm hover:bg-gray-800 text-gray-300"
         >
           <ChevronLeft className="w-4 h-4" />
         </button>
