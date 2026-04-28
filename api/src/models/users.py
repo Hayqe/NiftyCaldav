@@ -27,6 +27,9 @@ class UserSettings(Base):
     notifications_enabled = Column(Boolean, default=False)
     timezone = Column(String, default="Europe/Amsterdam")
     language = Column(String, default="nl")
+    default_view = Column(String, default="month")
+    highlight_weekend = Column(Boolean, default=False)
+    weekend_color = Column(String, default="#FEF9C3") # light yellow
 
     # Relationships
     user = relationship("User", back_populates="user_settings")

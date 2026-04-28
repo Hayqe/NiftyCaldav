@@ -3,7 +3,7 @@ import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, end
 import { nl } from 'date-fns/locale';
 import { MapPin } from 'lucide-react';
 import { useCalendarContext } from '@/context/CalendarContext';
-import { useEvents, useCreateEvent, useUpdateEvent } from '@/hooks';
+import { useEvents, useCreateEvent, useUpdateEvent, useSettings } from '@/hooks';
 import type { Event } from '@/types';
 import { CALENDAR_COLORS, WEEKDAYS } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -29,6 +29,8 @@ export default function HomePage() {
     selectedDate,
     getActiveCalendarIds,
   } = useCalendarContext();
+
+  const { data: settings } = useSettings();
 
   const activeCalendarIds = getActiveCalendarIds();
   
@@ -205,47 +207,17 @@ export default function HomePage() {
   };
 
   const renderMonthView = () => {
-    const year = selectedDate.getFullYear();
-    const month = selectedDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
+    const monthStart = startOfMonth(selectedDate);
+    const monthEnd = endOfMonth(selectedDate);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
     
-    const days: { day: number; date: Date; isCurrentMonth: boolean; isToday: boolean }[] = [];
-    
-    // Previous month days
-    for (let i = firstDay - 1; i >= 0; i--) {
-      days.push({
-        day: daysInPrevMonth - i,
-        date: new Date(year, month - 1, daysInPrevMonth - i),
-        isCurrentMonth: false,
-        isToday: false,
-      });
-    }
-    
-    // Current month days
+    const calendarDays = eachDayOfInterval({
+      start: calendarStart,
+      end: calendarEnd,
+    });
+
     const today = new Date();
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month, day);
-      days.push({
-        day,
-        date,
-        isCurrentMonth: true,
-        isToday: date.toDateString() === today.toDateString(),
-      });
-    }
-    
-    // Next month days
-    const totalCells = 42;
-    const remainingDays = totalCells - days.length;
-    for (let day = 1; day <= remainingDays; day++) {
-      days.push({
-        day,
-        date: new Date(year, month + 1, day),
-        isCurrentMonth: false,
-        isToday: false,
-      });
-    }
 
     // Get events for each day
     const getEventsForDay = (date: Date) => {
@@ -273,29 +245,37 @@ export default function HomePage() {
         
         {/* Calendar grid */}
         <div className="grid grid-cols-7 gap-px bg-gray-200">
-          {days.map((dayInfo, index) => {
-            const dayEvents = getEventsForDay(dayInfo.date);
-            const isSelected = selectedDate.toDateString() === dayInfo.date.toDateString();
+          {calendarDays.map((date, index) => {
+            const dayEvents = getEventsForDay(date);
+            const isSelected = isSameDay(date, selectedDate);
+            const isCurrentMonth = date.getMonth() === selectedDate.getMonth();
+            const isToday = isSameDay(date, today);
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
             
             return (
               <div
                 key={index}
                 className={cn(
-                  'relative bg-white p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
-                  isSelected ? 'bg-primary-50' : ''
+                  'relative p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
+                  isSelected ? 'bg-primary-50' : 'bg-white'
                 )}
-                onClick={() => handleDateClick(dayInfo.date)}
+                style={
+                  settings?.data?.highlight_weekend && isWeekend
+                    ? { backgroundColor: '#FEF9C3' }
+                    : undefined
+                }
+                onClick={() => handleDateClick(date)}
               >
                 {/* Day number */}
                 <div className="mb-1">
                   <span
                     className={cn(
                       'text-sm font-medium',
-                      dayInfo.isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
-                      dayInfo.isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
+                      isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
+                      isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
                     )}
                   >
-                    {dayInfo.day}
+                    {date.getDate()}
                   </span>
                 </div>
                 
@@ -396,6 +376,7 @@ export default function HomePage() {
             {weekDays.map((day, dayIndex) => {
               const dayKey = format(day, 'yyyy-MM-dd');
               const dayEvents = eventsByDate.get(dayKey) || [];
+              const isWeekend = dayIndex >= 5;
 
               // Sort events by start time
               const sortedEvents = [...dayEvents].sort((a, b) => 
@@ -403,8 +384,18 @@ export default function HomePage() {
               );
 
               return (
-                <div key={dayIndex} className="relative bg-white border-b border-gray-200 min-h-[1920px]" onClick={() => handleDateClick(day)}>
-                  {/* Horizontal hour lines */}
+                <div 
+                  key={dayIndex} 
+                  className={cn(
+                    "relative border-b border-gray-200 min-h-[1920px]"
+                  )} 
+                  style={
+                    settings?.data?.highlight_weekend && isWeekend
+                      ? { backgroundColor: '#FEF9C3' }
+                      : { backgroundColor: 'white' }
+                  }
+                  onClick={() => handleDateClick(day)}
+                >                  {/* Horizontal hour lines */}
                   {Array.from({ length: 24 }).map((_, i) => (
                     <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 80}px`, height: '80px' }} />
                   ))}
@@ -551,7 +542,15 @@ export default function HomePage() {
             </div>
             
             {/* Events column with dynamic lanes */}
-            <div className="relative bg-white min-h-[1920px]" onClick={() => handleDateClick(selectedDate)}>
+            <div 
+              className="relative min-h-[1920px]" 
+              style={
+                settings?.data?.highlight_weekend && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
+                  ? { backgroundColor: '#FEF9C3' }
+                  : { backgroundColor: 'white' }
+              }
+              onClick={() => handleDateClick(selectedDate)}
+            >
               {/* Horizontal hour lines */}
               {Array.from({ length: 24 }).map((_, i) => (
                 <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 80}px`, height: '80px' }} />

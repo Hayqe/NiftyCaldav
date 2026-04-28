@@ -8,16 +8,16 @@ export const CALENDAR_VIEWS: { id: CalendarView; label: string; icon: string }[]
 ];
 
 export const CALENDAR_COLORS = [
-  { value: 'blue', label: 'Blauw', hex: '#3b82f6' },
-  { value: 'red', label: 'Rood', hex: '#ef4444' },
-  { value: 'green', label: 'Groen', hex: '#10b981' },
-  { value: 'purple', label: 'Paars', hex: '#8b5cf6' },
-  { value: 'orange', label: 'Oranje', hex: '#f97316' },
-  { value: 'yellow', label: 'Geel', hex: '#eab308' },
-  { value: 'pink', label: 'Roze', hex: '#ec4899' },
-  { value: 'indigo', label: 'Indigo', hex: '#6366f1' },
-  { value: 'teal', label: 'Turquoise', hex: '#14b8a6' },
-  { value: 'gray', label: 'Grijs', hex: '#6b7280' },
+  { value: 'orange', label: 'Oranje', hex: '#c26321' },
+  { value: 'rust', label: 'Roest', hex: '#a3501a' },
+  { value: 'brown', label: 'Bruin', hex: '#854215' },
+  { value: 'sand', label: 'Zand', hex: '#d6d3d1' },
+  { value: 'sage', label: 'Salie', hex: '#84a98c' },
+  { value: 'muted-blue', label: 'Gedempt Blauw', hex: '#6b9ac4' },
+  { value: 'slate', label: 'Leisteen', hex: '#52796f' },
+  { value: 'deep-purple', label: 'Diep Paars', hex: '#4a4e69' },
+  { value: 'charcoal', label: 'Antraciet', hex: '#22223b' },
+  { value: 'warm-gray', label: 'Warm Grijs', hex: '#a4ac86' },
 ];
 
 export const PERMISSION_OPTIONS = [

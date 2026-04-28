@@ -3,6 +3,9 @@ CalDAV Client for interaction with Radicale server.
 Handles calendar management and event operations.
 """
 import os
+import re
+import requests
+from requests.auth import HTTPBasicAuth
 import caldav
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
@@ -62,13 +65,8 @@ class CalDAVClient:
     def get_calendar_color(self, calendar_url: str) -> Optional[str]:
         """Get the color of a calendar from Radicale via PROPFIND."""
         try:
-            import requests
-            from requests.auth import HTTPBasicAuth
-            import re
-            
             username = self.client.username if hasattr(self.client, 'username') else None
             password = self.client.password if hasattr(self.client, 'password') else "admin"
-            
             # Clean up URL (remove trailing slash)
             url = calendar_url.rstrip('/') + '/'
             
@@ -80,16 +78,9 @@ class CalDAVClient:
             )
             
             if response.status_code == 207:
-                # Parse color from XML response
-                # Try both apple and caldav namespaces for color
-                match = re.search(r'<(?:C|ical):calendar-color>([^<]+)</(?:C|ical):calendar-color>', response.text)
-                if not match:
-                    # Fallback to any calendar-color tag
-                    match = re.search(r'<[^:]+:calendar-color>([^<]+)</[^:]+:calendar-color>', response.text)
-                if not match:
-                    # Try without namespace
-                    match = re.search(r'<calendar-color>([^<]+)</calendar-color>', response.text)
-                    
+                # Parse color from XML response - handle both standard and namespaced tags
+                # Matches <[...]:calendar-color> OR <calendar-color>
+                match = re.search(r'<(?:[^:]+:)?calendar-color>([^<]+)</(?:[^:]+:)?calendar-color>', response.text)
                 if match:
                     return match.group(1)
         except Exception as e:
@@ -147,7 +138,7 @@ class CalDAVClient:
                     "name": cal_name,
                     "url": cal_url,
                     "description": cal_desc or "",
-                    "color": color or "blue",
+                    "color": color or "#3b82f6",
                     "owner_username": username,
                 })
             return result
@@ -194,43 +185,34 @@ class CalDAVClient:
             print(f"Error getting calendar '{calendar_name}': {e}")
             return None
     
-    def create_calendar(self, calendar_name: str, description: str = None) -> Optional[caldav.Calendar]:
+    def create_calendar(self, calendar_name: str, description: str = None, color: str = None) -> Optional[caldav.Calendar]:
         """Create a new calendar using MKCALENDAR."""
         if not self.is_connected():
             return None
-        
+
         try:
             # Save credentials
             username = self.client.username if hasattr(self.client, 'username') else None
             password = self.client.password if hasattr(self.client, 'password') else None
-            
-            # Use raw HTTP MKCALENDAR request
-            import requests
-            from requests.auth import HTTPBasicAuth
-            
+
             # Clean up calendar name (replace spaces with underscores for URL)
             # Remove username prefix if present (e.g., "admin/TestCal" -> "TestCal")
             clean_name = calendar_name.replace(' ', '_')
             if username and clean_name.startswith(username + '/'):
                 clean_name = clean_name[len(username) + 1:]
             url = f"{self.radicale_url}/{username}/{clean_name}/"
-            
-            # Generate random color for calendar
-            import random
-            colors = ['blue', 'green', 'red', 'orange', 'purple', 'pink', 'yellow']
-            calendar_color = random.choice(colors)
-            
-            # Build XML body with calendar color (CalDAV standard)
+
+            # Build XML body with calendar color (Apple CalDAV standard)
             xml_body = f'''<?xml version="1.0" encoding="utf-8" ?>
-<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav">
-    <D:set xmlns:D="DAV:">
+    <C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:I="http://apple.com/ns/ical/">
+    <D:set>
         <D:prop>
             <D:displayname>{calendar_name}</D:displayname>
             <C:calendar-description>{description or ''}</C:calendar-description>
-            <C:calendar-color>{calendar_color}</C:calendar-color>
+            <I:calendar-color>{color or '#3b82f6'}</I:calendar-color>
         </D:prop>
     </D:set>
-</C:mkcalendar>'''
+    </C:mkcalendar>'''
             
             response = requests.request(
                 'MKCALENDAR',

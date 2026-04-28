@@ -9,10 +9,13 @@ export interface User {
 
 export interface UserSettings {
   user_id: number;
-  calendar_colors: string;
-  notifications_enabled: boolean;
-  timezone: string;
-  language: string;
+  calendar_colors?: string;
+  notifications_enabled?: boolean;
+  timezone?: string;
+  language?: string;
+  default_view: string;
+  highlight_weekend: boolean;
+  weekend_color: string;
 }
 
 // Calendar Types

@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import Base, engine
-from .routes import auth_router, users_router, calendars_router, events_router, ics_router
+from .routes import auth_router, users_router, calendars_router, events_router, ics_router, settings_router
 
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
@@ -32,6 +32,7 @@ app.include_router(users_router)
 app.include_router(calendars_router)
 app.include_router(events_router)
 app.include_router(ics_router)
+app.include_router(settings_router)
 
 
 @app.get("/")
