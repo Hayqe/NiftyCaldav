@@ -347,10 +347,10 @@ export default function HomePage() {
                   isSameDay(day, selectedDate) ? 'bg-primary-50' : ''
                 )}
               >
-                {WEEKDAYS[index]}
+                <div>{WEEKDAYS[index]}</div>
                 <div className={cn(
-                  'text-xs mt-1 inline-block',
-                  isSameDay(day, new Date()) ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : ''
+                  'text-xs mt-1',
+                  isSameDay(day, new Date()) ? 'bg-primary-600 text-white px-2 py-0.5 rounded inline-block' : 'block'
                 )}>
                   {day.getDate()}
                 </div>

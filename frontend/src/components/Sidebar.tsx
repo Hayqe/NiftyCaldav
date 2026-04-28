@@ -125,8 +125,8 @@ export default function Sidebar() {
                     <div
                       key={calendar.id}
                       className={cn(
-                        'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all hover:bg-white/5',
-                        isCalendarActive(calendar.id) ? 'bg-primary-500 text-white' : 'text-gray-300'
+                        'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all hover:bg-white/10',
+                        isCalendarActive(calendar.id) ? 'text-white' : 'text-gray-300'
                       )}
                       onClick={() => toggleCalendar(calendar.id)}
                     >
@@ -141,6 +141,7 @@ export default function Sidebar() {
                         <EyeOff className="w-4 h-4 opacity-50" />
                       )}
                     </div>
+
                   );
                 })}
               </div>
@@ -160,14 +161,15 @@ export default function Sidebar() {
                   <div
                     key={calendar.id}
                     className={cn(
-                      'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all hover:bg-white/5',
-                      isCalendarActive(calendar.id) ? 'bg-primary-500 text-white' : 'text-gray-300'
+                      'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all hover:bg-white/10',
+                      isCalendarActive(calendar.id) ? 'text-white' : 'text-gray-300'
                     )}
                     onClick={() => toggleCalendar(calendar.id)}
                   >
                     <div className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20" style={{ backgroundColor: colorHex }} />
                     <span className="flex-1 text-sm truncate">{calendar.name}</span>
                   </div>
+
                 );
               })}
             </div>
