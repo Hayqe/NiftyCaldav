@@ -33,6 +33,9 @@ class UserSettingsBase(BaseModel):
     notifications_enabled: Optional[bool] = False
     timezone: Optional[str] = "Europe/Amsterdam"
     language: Optional[str] = "nl"
+    default_view: Optional[str] = "month"
+    highlight_weekend: Optional[bool] = False
+    weekend_color: Optional[str] = "#FEF9C3"
 
 
 class UserSettingsUpdate(UserSettingsBase):

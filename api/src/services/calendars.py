@@ -38,11 +38,16 @@ class CalendarService:
         
         if client.calendar_exists(calendar.name):
             raise Exception(f"Calendar '{calendar.name}' already exists")
-        
-        if not client.create_calendar(calendar.name, calendar.description):
-            raise Exception(f"Failed to create calendar '{calendar.name}' in Radicale")
-        
-        # Return calendar info from Radicale
+
+        if not client.create_calendar(calendar.name, calendar.description, calendar.color):
+            raise Exception(f"Failed to create calendar '{calendar.name}' in Radicale")        
+        # Return fresh calendar info from Radicale
+        calendars = client.get_calendars()
+        for cal in calendars:
+            if cal['name'] == calendar.name or cal['url'].endswith(f"/{calendar.name}/"):
+                return cal
+                
+        # Fallback if for some reason listing fails right after creation
         cal = client.get_calendar(calendar.name)
         cal_url = str(cal.url) if cal else f"{client.radicale_url}/{username}/{calendar.name}/"
         return {
@@ -54,51 +59,20 @@ class CalendarService:
         }
 
     @staticmethod
-    def create_calendar(db: Session, calendar: CalendarCreate, owner_id: int) -> Calendar:
-        db_calendar = Calendar(
-            name=calendar.name,
-            description=calendar.description or None,
-            owner_id=owner_id
-        )
-        db.add(db_calendar)
-        db.commit()
-        db.refresh(db_calendar)
-        
-        # Also create the calendar in CalDAV
-        try:
-            from ..models import User
-            user = db.query(User).filter(User.id == owner_id).first()
-            if user:
-                # Need to reconnect to ensure we have fresh connection
-                client = CalDAVClient()
-                if client.connect(user.username, "admin"):
-                    if not client.calendar_exists(calendar.name):
-                        client.create_calendar(calendar.name, calendar.description)
-        except Exception as e:
-            print(f"Warning: Could not create calendar in CalDAV: {e}")
-        
-        return db_calendar
+    def create_calendar(db: Session, calendar: CalendarCreate, owner_id: int) -> dict:
+        """Create calendar directly in Radicale."""
+        # We ignore DB and use Radicale as Source of Truth
+        from ..models import User
+        user = db.query(User).filter(User.id == owner_id).first()
+        if not user:
+            raise Exception("User not found")
+            
+        return CalendarService.create_calendar_radicale(calendar, user.username)
 
     @staticmethod
-    def update_calendar(db: Session, calendar_id: int, calendar: CalendarUpdate, owner_id: int) -> Optional[Calendar]:
-        db_calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
-        if not db_calendar:
-            return None
-        
-        # Check if user is owner or admin
-        if db_calendar.owner_id != owner_id:
-            return None
-
-        if calendar.name:
-            db_calendar.name = calendar.name
-        if calendar.description is not None:
-            db_calendar.description = calendar.description
-        if calendar.color is not None:
-            db_calendar.color = calendar.color
-
-        db.commit()
-        db.refresh(db_calendar)
-        return db_calendar
+    def update_calendar(db: Session, calendar_id: int, calendar: CalendarUpdate, owner_id: int) -> Optional[dict]:
+        """Update calendar directly in Radicale (not supported)."""
+        return None
 
     @staticmethod
     def delete_calendar(db: Session, calendar_id: int, owner_id: int) -> bool:

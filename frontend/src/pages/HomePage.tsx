@@ -3,7 +3,7 @@ import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, end
 import { nl } from 'date-fns/locale';
 import { MapPin } from 'lucide-react';
 import { useCalendarContext } from '@/context/CalendarContext';
-import { useEvents, useCreateEvent, useUpdateEvent } from '@/hooks';
+import { useEvents, useCreateEvent, useUpdateEvent, useSettings } from '@/hooks';
 import type { Event } from '@/types';
 import { CALENDAR_COLORS, WEEKDAYS } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -29,6 +29,8 @@ export default function HomePage() {
     selectedDate,
     getActiveCalendarIds,
   } = useCalendarContext();
+
+  const { data: settings } = useSettings();
 
   const activeCalendarIds = getActiveCalendarIds();
   
@@ -205,47 +207,17 @@ export default function HomePage() {
   };
 
   const renderMonthView = () => {
-    const year = selectedDate.getFullYear();
-    const month = selectedDate.getMonth();
-    const firstDay = new Date(year, month, 1).getDay();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    const daysInPrevMonth = new Date(year, month, 0).getDate();
+    const monthStart = startOfMonth(selectedDate);
+    const monthEnd = endOfMonth(selectedDate);
+    const calendarStart = startOfWeek(monthStart, { weekStartsOn: 1 });
+    const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 1 });
     
-    const days: { day: number; date: Date; isCurrentMonth: boolean; isToday: boolean }[] = [];
-    
-    // Previous month days
-    for (let i = firstDay - 1; i >= 0; i--) {
-      days.push({
-        day: daysInPrevMonth - i,
-        date: new Date(year, month - 1, daysInPrevMonth - i),
-        isCurrentMonth: false,
-        isToday: false,
-      });
-    }
-    
-    // Current month days
+    const calendarDays = eachDayOfInterval({
+      start: calendarStart,
+      end: calendarEnd,
+    });
+
     const today = new Date();
-    for (let day = 1; day <= daysInMonth; day++) {
-      const date = new Date(year, month, day);
-      days.push({
-        day,
-        date,
-        isCurrentMonth: true,
-        isToday: date.toDateString() === today.toDateString(),
-      });
-    }
-    
-    // Next month days
-    const totalCells = 42;
-    const remainingDays = totalCells - days.length;
-    for (let day = 1; day <= remainingDays; day++) {
-      days.push({
-        day,
-        date: new Date(year, month + 1, day),
-        isCurrentMonth: false,
-        isToday: false,
-      });
-    }
 
     // Get events for each day
     const getEventsForDay = (date: Date) => {
@@ -273,29 +245,37 @@ export default function HomePage() {
         
         {/* Calendar grid */}
         <div className="grid grid-cols-7 gap-px bg-gray-200">
-          {days.map((dayInfo, index) => {
-            const dayEvents = getEventsForDay(dayInfo.date);
-            const isSelected = selectedDate.toDateString() === dayInfo.date.toDateString();
+          {calendarDays.map((date, index) => {
+            const dayEvents = getEventsForDay(date);
+            const isSelected = isSameDay(date, selectedDate);
+            const isCurrentMonth = date.getMonth() === selectedDate.getMonth();
+            const isToday = isSameDay(date, today);
+            const isWeekend = date.getDay() === 0 || date.getDay() === 6;
             
             return (
               <div
                 key={index}
                 className={cn(
-                  'relative bg-white p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
-                  isSelected ? 'bg-primary-50' : ''
+                  'relative p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
+                  isSelected ? 'bg-primary-50' : 'bg-white'
                 )}
-                onClick={() => handleDateClick(dayInfo.date)}
+                style={
+                  settings?.data?.highlight_weekend && isWeekend
+                    ? { backgroundColor: '#FEF9C3' }
+                    : undefined
+                }
+                onClick={() => handleDateClick(date)}
               >
                 {/* Day number */}
                 <div className="mb-1">
                   <span
                     className={cn(
                       'text-sm font-medium',
-                      dayInfo.isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
-                      dayInfo.isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
+                      isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
+                      isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
                     )}
                   >
-                    {dayInfo.day}
+                    {date.getDate()}
                   </span>
                 </div>
                 
@@ -344,8 +324,8 @@ export default function HomePage() {
     });
 
     return (
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col max-h-[calc(100vh-140px)]">
+        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 sticky top-0 z-30">
           <h2 className="text-lg font-semibold text-gray-900">
             {format(weekStart, 'd MMMM yyyy', { locale: nl })} - {
               format(new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000), 'd MMMM yyyy', { locale: nl })
@@ -353,146 +333,176 @@ export default function HomePage() {
           </h2>
         </div>
         
-        <div className="grid grid-cols-[auto_1fr] gap-px bg-gray-200">
-          {/* Time header */}
-          <div className="bg-white p-3 text-right text-sm font-medium text-gray-500">
-            Tijd
-          </div>
-          {weekDays.map((day, index) => (
-            <div
-              key={index}
-              className={cn(
-                'bg-white p-3 text-center text-sm font-medium',
-                isSameDay(day, selectedDate) ? 'bg-primary-50' : 'hover:bg-gray-50'
-              )}
-            >
-              {WEEKDAYS[day.getDay()]}
-              <div className={cn(
-                'text-xs mt-1',
-                isSameDay(day, new Date()) ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : ''
-              )}>
-                {day.getDate()}
-              </div>
+        <div className="overflow-auto flex-1">
+          <div className="grid grid-cols-[80px_repeat(7,1fr)] gap-px bg-gray-200">
+            {/* Time header - Sticky to both top and left */}
+            <div className="bg-gray-50 p-3 text-right text-sm font-medium text-gray-500 sticky top-0 left-0 z-40 border-b border-gray-200">
+              Tijd
             </div>
-          ))}
-          
-          {/* Time slots column */}
-          <div className="bg-white">
-            {(() => {
-              const timeSlots = [];
-              for (let hour = 0; hour < 24; hour++) {
-                timeSlots.push(
-                  <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200" style={{ height: '40px' }}>
-                    {hour.toString().padStart(2, '0')}:00
-                  </div>
-                );
-                timeSlots.push(
-                  <div key={`${hour}-30`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200" style={{ height: '40px' }}>
-                    {hour.toString().padStart(2, '0')}:30
-                  </div>
-                );
-              }
-              return timeSlots;
-            })()}
-          </div>
-          
-          {/* Days columns with events as blocks in multiple lanes */}
-          {weekDays.map((day, dayIndex) => {
-            const dayKey = format(day, 'yyyy-MM-dd');
-            const dayEvents = eventsByDate.get(dayKey) || [];
-            
-            // Sort events by start time
-            const sortedEvents = [...dayEvents].sort((a, b) => 
-              parseISO(a.start).getTime() - parseISO(b.start).getTime()
-            );
-            
-            return (
-              <div key={dayIndex} className="relative bg-white">
-                {(() => {
-                  // Calculate max concurrent events for this day
-                  const timePoints = sortedEvents.flatMap(event => [
-                    { time: parseISO(event.start).getTime(), type: 'start', event },
-                    { time: parseISO(event.end).getTime(), type: 'end', event }
-                  ]).sort((a, b) => a.time - b.time);
-                  
-                  let maxConcurrent = 0;
-                  let current = 0;
-                  for (const point of timePoints) {
-                    if (point.type === 'start') current++;
-                    else current--;
-                    maxConcurrent = Math.max(maxConcurrent, current);
-                  }
-                  const numLanes = Math.min(Math.max(maxConcurrent, 1), 5); // Max 5 lanes
-                  const laneWidth = 100 / numLanes;
-                  
-                  // Assign events to lanes using greedy algorithm
-                  // Store both start and end times for overlap checking
-                  const lanes: Array<{event: typeof sortedEvents[0], startTime: number, endTime: number}[]> = [];
-                  for (let i = 0; i < numLanes; i++) lanes.push([]);
-                  
-                  // Map to store which lane each event is in
-                  const eventLaneMap = new Map<string, number>();
-                  
-                  sortedEvents.forEach(event => {
-                    const eventStartTime = parseISO(event.start).getTime();
-                    const eventEndTime = parseISO(event.end).getTime();
-                    
-                    // Find first lane where this event doesn't overlap
-                    for (let l = 0; l < numLanes; l++) {
-                      const hasOverlap = lanes[l].some(slot => 
-                        slot.startTime < eventEndTime && eventStartTime < slot.endTime
-                      );
-                      if (!hasOverlap) {
-                        lanes[l].push({ event, startTime: eventStartTime, endTime: eventEndTime });
-                        eventLaneMap.set(event.id, l);
-                        break;
-                      }
-                    }
-                  });
-                  
-                  // Render all events
-                  return sortedEvents.map((event, eventIndex) => {
-                    const color = getCalendarColor(event.calendar_id);
-                    const eventStart = parseISO(event.start);
-                    const eventEnd = parseISO(event.end);
-                    
-                    // Get lane index from map
-                    const laneIndex = eventLaneMap.get(event.id) || 0;
-                    
-                    // Calculate position: each 30min = 40px
-                    const startMinutes = eventStart.getHours() * 60 + eventStart.getMinutes();
-                    const endMinutes = eventEnd.getHours() * 60 + eventEnd.getMinutes();
-                    const top = startMinutes / 30 * 40;
-                    const height = Math.max((endMinutes - startMinutes) / 30 * 40, 24);
-                    
-                    return (
-                      <div
-                        key={eventIndex}
-                        className="absolute rounded text-xs px-2 py-1 cursor-pointer"
-                        style={{
-                          top: `${top}px`,
-                          left: `${laneIndex * laneWidth}%`,
-                          width: `${laneWidth}%`,
-                          height: `${height}px`,
-                          backgroundColor: color,
-                        }}
-                        title={`${format(eventStart, 'HH:mm')} - ${format(eventEnd, 'HH:mm')}: ${event.title}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditEvent(event);
-                        }}
-                      >
-                        <div className="flex items-center gap-1">
-                          <span className="text-white truncate font-bold">{format(eventStart, 'HH:mm')} {event.title}</span>
-                          {event.location && <MapPin className="w-3 h-3 text-white/80 flex-shrink-0" />}
-                        </div>
-                      </div>
-                    );
-                  });
-                })()}
+            {weekDays.map((day, index) => (
+              <div
+                key={index}
+                className={cn(
+                  'bg-gray-50 p-3 text-center text-sm font-medium sticky top-0 z-30 border-b border-gray-200',
+                  isSameDay(day, selectedDate) ? 'bg-primary-50' : ''
+                )}
+              >
+                <div>{WEEKDAYS[index]}</div>
+                <div className={cn(
+                  'text-xs mt-1',
+                  isSameDay(day, new Date()) ? 'bg-primary-600 text-white px-2 py-0.5 rounded inline-block' : 'block'
+                )}>
+                  {day.getDate()}
+                </div>
               </div>
-            );
-          })}
+            ))}
+            
+            {/* Time slots column - Sticky to left */}
+            <div className="bg-white sticky left-0 z-20 border-r border-gray-100">
+              {(() => {
+                const timeSlots = [];
+                for (let hour = 0; hour < 24; hour++) {
+                  timeSlots.push(
+                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '60px' }}>
+                      {hour.toString().padStart(2, '0')}:00
+                    </div>
+                  );
+                }
+                return timeSlots;
+              })()}
+            </div>
+
+            {/* Days columns with events as blocks in multiple lanes */}
+            {weekDays.map((day, dayIndex) => {
+              const dayKey = format(day, 'yyyy-MM-dd');
+              const dayEvents = eventsByDate.get(dayKey) || [];
+              const isWeekend = dayIndex >= 5;
+
+              // Sort events by start time
+              const sortedEvents = [...dayEvents].sort((a, b) => 
+                parseISO(a.start).getTime() - parseISO(b.start).getTime()
+              );
+
+              return (
+                <div 
+                  key={dayIndex} 
+                  className={cn(
+                    "relative border-b border-gray-200 min-h-[1440px]"
+                  )} 
+                  style={
+                    settings?.data?.highlight_weekend && isWeekend
+                      ? { backgroundColor: '#FEF9C3' }
+                      : { backgroundColor: 'white' }
+                  }
+                  onClick={() => handleDateClick(day)}
+                >                  {/* Horizontal hour lines */}
+                  {Array.from({ length: 24 }).map((_, i) => (
+                    <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 60}px`, height: '60px' }} />
+                  ))}
+
+                  {(() => {
+                    if (sortedEvents.length === 0) return null;
+
+                    // Group events into clusters of overlapping events
+                    const clusters: (typeof sortedEvents)[] = [];
+                    let currentCluster: typeof sortedEvents = [];
+                    let clusterEnd = 0;
+
+                    sortedEvents.forEach(event => {
+                      const start = parseISO(event.start).getTime();
+                      const end = parseISO(event.end).getTime();
+
+                      if (start >= clusterEnd) {
+                        if (currentCluster.length > 0) clusters.push(currentCluster);
+                        currentCluster = [event];
+                        clusterEnd = end;
+                      } else {
+                        currentCluster.push(event);
+                        clusterEnd = Math.max(clusterEnd, end);
+                      }
+                    });
+                    if (currentCluster.length > 0) clusters.push(currentCluster);
+
+                    // Render each cluster
+                    return clusters.map(cluster => {
+                      const timePoints = cluster.flatMap(event => [
+                        { time: parseISO(event.start).getTime(), type: 'start', id: event.id },
+                        { time: parseISO(event.end).getTime(), type: 'end', id: event.id }
+                      ]).sort((a, b) => {
+                        if (a.time !== b.time) return a.time - b.time;
+                        return a.type === 'end' ? -1 : 1;
+                      });
+
+                      let clusterMax = 0;
+                      let current = 0;
+                      timePoints.forEach(p => {
+                        if (p.type === 'start') current++;
+                        else current--;
+                        clusterMax = Math.max(clusterMax, current);
+                      });
+
+                      const numColumns = Math.max(clusterMax, 1);
+                      const colWidth = 100 / numColumns;
+
+                      const columns: string[][] = Array.from({ length: numColumns }, () => []);
+
+                      return cluster.map((event) => {
+                        const eventStart = parseISO(event.start);
+                        const eventEnd = parseISO(event.end);
+                        const startTime = eventStart.getTime();
+                        const endTime = eventEnd.getTime();
+
+                        let colIndex = 0;
+                        for (let i = 0; i < numColumns; i++) {
+                          const hasOverlap = columns[i].some(id => {
+                            const other = cluster.find(e => e.id === id);
+                            if (!other) return false;
+                            const otherStart = parseISO(other.start).getTime();
+                            const otherEnd = parseISO(other.end).getTime();
+                            return startTime < otherEnd && otherStart < endTime;
+                          });
+                          if (!hasOverlap) {
+                            colIndex = i;
+                            columns[i].push(event.id);
+                            break;
+                          }
+                        }
+
+                        const color = getCalendarColor(event.calendar_id);
+                        const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 60;
+                        const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 60, 30);
+
+                        return (
+                          <div
+                            key={event.id}
+                            className="absolute rounded text-[10px] sm:text-xs px-1.5 py-1 cursor-pointer shadow-sm border border-white/20 overflow-hidden"
+                            style={{
+                              top: `${top}px`,
+                              left: `${colIndex * colWidth}%`,
+                              width: `${colWidth - 0.5}%`,
+                              height: `${height}px`,
+                              backgroundColor: color,
+                              zIndex: 10,
+                            }}
+                            title={`${format(eventStart, 'HH:mm')} - ${format(eventEnd, 'HH:mm')}: ${event.title}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditEvent(event);
+                            }}
+                          >
+                            <div className="flex flex-col h-full">
+                              <span className="text-white font-bold truncate leading-tight">{event.title}</span>
+                              <span className="text-white/90 text-[10px] truncate">{format(eventStart, 'HH:mm')}</span>
+                            </div>
+                          </div>
+                        );
+                      });
+                    });
+                  })()}
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
     );
@@ -500,135 +510,166 @@ export default function HomePage() {
 
   const renderDayView = () => {
     return (
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
+      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden flex flex-col max-h-[calc(100vh-140px)]">
+        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200 sticky top-0 z-30">
           <h2 className="text-lg font-semibold text-gray-900">
             {format(selectedDate, 'EEEE d MMMM yyyy', { locale: nl })}
           </h2>
         </div>
         
-        <div className="grid grid-cols-[auto_1fr] gap-px bg-gray-200">
-          <div className="bg-white p-3 text-right text-sm font-medium text-gray-500">
-            Tijd
-          </div>
-          <div className="bg-white p-3 text-center text-sm font-medium">
-            {format(selectedDate, 'EEEE d MMMM', { locale: nl })}
-          </div>
-          
-          {/* Time slots column */}
-          <div className="bg-white">
-            {(() => {
-              const timeSlots = [];
-              for (let hour = 0; hour < 24; hour++) {
-                timeSlots.push(
-                  <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200" style={{ height: '40px' }}>
-                    {hour.toString().padStart(2, '0')}:00
-                  </div>
-                );
-                timeSlots.push(
-                  <div key={`${hour}-30`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200" style={{ height: '40px' }}>
-                    {hour.toString().padStart(2, '0')}:30
-                  </div>
-                );
-              }
-              return timeSlots;
-            })()}
-          </div>
-          
-          {/* Events column with dynamic lanes */}
-          <div className="relative bg-white">
-            {(() => {
-              // Sort events by start time
-              const sortedEvents = [...events].sort((a, b) => 
-                parseISO(a.start).getTime() - parseISO(b.start).getTime()
-              );
-              
-              if (sortedEvents.length === 0) return null;
-              
-              // Calculate max concurrent events
-              const timePoints = sortedEvents.flatMap(event => [
-                { time: parseISO(event.start).getTime(), type: 'start', event },
-                { time: parseISO(event.end).getTime(), type: 'end', event }
-              ]).sort((a, b) => a.time - b.time);
-              
-              let maxConcurrent = 0;
-              let current = 0;
-              for (const point of timePoints) {
-                if (point.type === 'start') current++;
-                else current--;
-                maxConcurrent = Math.max(maxConcurrent, current);
-              }
-              const numLanes = Math.min(Math.max(maxConcurrent, 1), 5); // Max 5 lanes
-              const laneWidth = 100 / numLanes;
-              
-              // Assign events to lanes using greedy algorithm
-              const lanes: Array<{event: typeof sortedEvents[0], startTime: number, endTime: number}[]> = [];
-              for (let i = 0; i < numLanes; i++) lanes.push([]);
-              
-              // Map to store which lane each event is in
-              const eventLaneMap = new Map<string, number>();
-              
-              sortedEvents.forEach(event => {
-                const eventStartTime = parseISO(event.start).getTime();
-                const eventEndTime = parseISO(event.end).getTime();
-                
-                // Find first lane where this event doesn't overlap
-                for (let l = 0; l < numLanes; l++) {
-                  const hasOverlap = lanes[l].some(slot => 
-                    slot.startTime < eventEndTime && eventStartTime < slot.endTime
+        <div className="overflow-auto flex-1">
+          <div className="grid grid-cols-[80px_1fr] gap-px bg-gray-200">
+            <div className="bg-gray-50 p-3 text-right text-sm font-medium text-gray-500 sticky top-0 left-0 z-40 border-b border-gray-200">
+              Tijd
+            </div>
+            <div className="bg-gray-50 p-3 text-center text-sm font-medium sticky top-0 z-30 border-b border-gray-200">
+              {format(selectedDate, 'EEEE d MMMM', { locale: nl })}
+            </div>
+            
+            {/* Time slots column - Sticky to left */}
+            <div className="bg-white sticky left-0 z-20 border-r border-gray-100">
+              {(() => {
+                const timeSlots = [];
+                for (let hour = 0; hour < 24; hour++) {
+                  timeSlots.push(
+                    <div key={`${hour}-00`} className="p-3 text-right text-xs text-gray-500 border-b border-gray-200 flex items-center justify-end bg-white" style={{ height: '60px' }}>
+                      {hour.toString().padStart(2, '0')}:00
+                    </div>
                   );
-                  if (!hasOverlap) {
-                    lanes[l].push({ event, startTime: eventStartTime, endTime: eventEndTime });
-                    eventLaneMap.set(event.id, l);
-                    break;
-                  }
                 }
-              });
-              
-              // Render all events
-              return sortedEvents.map((event, eventIndex) => {
-                const color = getCalendarColor(event.calendar_id);
-                const eventStart = parseISO(event.start);
-                const eventEnd = parseISO(event.end);
-                
-                // Get lane index from map
-                const laneIndex = eventLaneMap.get(event.id) || 0;
-                
-                // Calculate position: each 30min = 40px
-                const startMinutes = eventStart.getHours() * 60 + eventStart.getMinutes();
-                const endMinutes = eventEnd.getHours() * 60 + eventEnd.getMinutes();
-                const top = startMinutes / 30 * 40;
-                const height = Math.max((endMinutes - startMinutes) / 30 * 40, 32);
-                
-                return (
-                  <div
-                    key={eventIndex}
-                    className="absolute rounded text-sm px-2 py-1 cursor-pointer"
-                    style={{
-                      top: `${top}px`,
-                      left: `${laneIndex * laneWidth}%`,
-                      width: `${laneWidth}%`,
-                      height: `${height}px`,
-                      backgroundColor: color,
-                    }}
-                    title={`${format(eventStart, 'HH:mm')} - ${format(eventEnd, 'HH:mm')}: ${event.title}${event.location ? ` - ${event.location}` : ''}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleEditEvent(event);
-                    }}
-                  >
-                    <span className="text-white truncate block font-bold">{event.title}</span>
-                    <span className="text-white/80 text-xs">{format(eventStart, 'HH:mm')}</span>
-                    {event.location && (
-                      <div className="flex items-center gap-1 text-white/80 text-xs">
-                        <MapPin className="w-3 h-3" />
-                        <span>{event.location}</span>
-                      </div>
-                    )}
-                  </div>
+                return timeSlots;
+              })()}
+            </div>
+            
+            {/* Events column with dynamic lanes */}
+            <div 
+              className="relative min-h-[1440px]" 
+              style={
+                settings?.data?.highlight_weekend && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
+                  ? { backgroundColor: '#FEF9C3' }
+                  : { backgroundColor: 'white' }
+              }
+              onClick={() => handleDateClick(selectedDate)}
+            >
+              {/* Horizontal hour lines */}
+              {Array.from({ length: 24 }).map((_, i) => (
+                <div key={i} className="absolute left-0 right-0 border-b border-gray-100" style={{ top: `${i * 60}px`, height: '60px' }} />
+              ))}
+
+              {(() => {
+                // Sort events by start time
+                const sortedEvents = [...events].sort((a, b) => 
+                  parseISO(a.start).getTime() - parseISO(b.start).getTime()
                 );
-              });
-            })()}
+                
+                if (sortedEvents.length === 0) return null;
+                
+                // Group events into clusters of overlapping events
+                const clusters: (typeof sortedEvents)[] = [];
+                let currentCluster: typeof sortedEvents = [];
+                let clusterEnd = 0;
+
+                sortedEvents.forEach(event => {
+                  const start = parseISO(event.start).getTime();
+                  const end = parseISO(event.end).getTime();
+
+                  if (start >= clusterEnd) {
+                    if (currentCluster.length > 0) clusters.push(currentCluster);
+                    currentCluster = [event];
+                    clusterEnd = end;
+                  } else {
+                    currentCluster.push(event);
+                    clusterEnd = Math.max(clusterEnd, end);
+                  }
+                });
+                if (currentCluster.length > 0) clusters.push(currentCluster);
+
+                // Render each cluster
+                return clusters.map((cluster, cIdx) => {
+                  // Calculate max concurrency within THIS cluster
+                  const timePoints = cluster.flatMap(event => [
+                    { time: parseISO(event.start).getTime(), type: 'start', id: event.id },
+                    { time: parseISO(event.end).getTime(), type: 'end', id: event.id }
+                  ]).sort((a, b) => {
+                    if (a.time !== b.time) return a.time - b.time;
+                    return a.type === 'end' ? -1 : 1;
+                  });
+
+                  let clusterMax = 0;
+                  let current = 0;
+                  timePoints.forEach(p => {
+                    if (p.type === 'start') current++;
+                    else current--;
+                    clusterMax = Math.max(clusterMax, current);
+                  });
+
+                  const numColumns = Math.max(clusterMax, 1);
+                  const colWidth = 100 / numColumns;
+
+                  // Assign columns within cluster using greedy
+                  const columns: string[][] = Array.from({ length: numColumns }, () => []);
+                  
+                  return cluster.map((event) => {
+                    const eventStart = parseISO(event.start);
+                    const eventEnd = parseISO(event.end);
+                    const startTime = eventStart.getTime();
+                    const endTime = eventEnd.getTime();
+                    
+                    // Find first available column
+                    let colIndex = 0;
+                    for (let i = 0; i < numColumns; i++) {
+                      const hasOverlap = columns[i].some(id => {
+                        const other = cluster.find(e => e.id === id);
+                        if (!other) return false;
+                        const otherStart = parseISO(other.start).getTime();
+                        const otherEnd = parseISO(other.end).getTime();
+                        return startTime < otherEnd && otherStart < endTime;
+                      });
+                      if (!hasOverlap) {
+                        colIndex = i;
+                        columns[i].push(event.id);
+                        break;
+                      }
+                    }
+
+                    const color = getCalendarColor(event.calendar_id);
+                    const top = (eventStart.getHours() * 60 + eventStart.getMinutes()) / 60 * 60;
+                    const height = Math.max(((endTime - startTime) / (1000 * 60 * 60)) * 60, 30);
+
+                    return (
+                      <div
+                        key={event.id}
+                        className="absolute rounded text-sm px-2 py-1 cursor-pointer shadow-sm border border-white/20 overflow-hidden"
+                        style={{
+                          top: `${top}px`,
+                          left: `${colIndex * colWidth}%`,
+                          width: `${colWidth - 0.5}%`,
+                          height: `${height}px`,
+                          backgroundColor: color,
+                          zIndex: 10,
+                        }}
+                        title={`${format(eventStart, 'HH:mm')} - ${format(eventEnd, 'HH:mm')}: ${event.title}${event.location ? ` - ${event.location}` : ''}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditEvent(event);
+                        }}
+                      >
+                        <div className="flex flex-col h-full">
+                          <span className="text-white font-bold truncate block leading-tight">{event.title}</span>
+                          <span className="text-white/90 text-xs">{format(eventStart, 'HH:mm')}</span>
+                          {event.location && (
+                            <div className="flex items-center gap-1 text-white/80 text-[10px] mt-0.5">
+                              <MapPin className="w-3 h-3" />
+                              <span className="truncate">{event.location}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  });
+                });
+              })()}
+            </div>
           </div>
         </div>
       </div>

@@ -48,13 +48,14 @@ class CalendarWithShares(CalendarInDB):
     shares: List[CalendarShareInDB] = []
 
 
-# Radicale-only calendar schema (no database ID)
-class CalendarRadicale(BaseModel):
-    name: str
+# Radicale-only calendar schema with virtual ID for frontend compatibility
+class CalendarRadicale(CalendarBase):
+    id: int  # Virtual ID generated from URL hash
     url: str
-    description: Optional[str] = None
-    color: Optional[str] = None
+    owner_id: int = 1  # Default, will be set based on owner_username
     owner_username: Optional[str] = None  # Extracted from URL
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

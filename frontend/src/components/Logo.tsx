@@ -1,12 +1,13 @@
 import { Calendar } from 'lucide-react';
 
-export default function Logo({ className = 'w-8 h-8' }: { className?: string }) {
+interface LogoProps {
+  className?: string;
+}
+
+export default function Logo({ className = "w-8 h-8" }: LogoProps) {
   return (
-    <div className="relative inline-flex items-center justify-center">
-      {/* Rotated square background */}
-      <div className="absolute w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-700 rounded-2xl logo-square shadow-lg" />
-      {/* Calendar icon */}
-      <Calendar className={`relative z-10 text-white ${className}`} />
+    <div className={`relative flex items-center justify-center bg-[#c26321] rounded-lg rotate-[5deg] ${className}`}>
+      <Calendar className="w-[60%] h-[60%] text-white" strokeWidth={2.5} />
     </div>
   );
 }

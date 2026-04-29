@@ -8,29 +8,18 @@ export default {
     extend: {
       colors: {
         primary: {
-          50: '#f0f9ff',
-          100: '#e0f2fe',
-          200: '#bae6fd',
-          300: '#7dd3fc',
-          400: '#38bdf8',
-          500: '#0ea5e9',
-          600: '#0284c7',
-          700: '#0369a1',
-          800: '#075985',
-          900: '#0c4a6e',
-          950: '#082f49',
+          50: '#fdf4ec',
+          100: '#fdeadd',
+          500: '#c26321',
+          600: '#a3501a',
+          700: '#854215',
         },
-        calendar: {
-          blue: '#3b82f6',
-          red: '#ef4444',
-          green: '#10b981',
-          purple: '#8b5cf6',
-          orange: '#f97316',
-          yellow: '#eab308',
-        }
+        sidebar: '#282520',
+        bg: '#f9f8f6',
+        header: '#f4f3ef',
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', 'sans-serif'],
+        sans: ['Roboto', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         '4xl': '2rem',

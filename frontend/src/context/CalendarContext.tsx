@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
-import { useMyCalendars, useSharedCalendars } from '@/hooks';
+import { useMyCalendars, useSharedCalendars, useSettings } from '@/hooks';
 import type { Calendar, CalendarView } from '@/types';
 
 interface CalendarContextType {
@@ -38,6 +38,7 @@ interface CalendarProviderProps {
 export function CalendarProvider({ children }: CalendarProviderProps) {
   const { data: myCalendarsData, isLoading: isLoadingMy } = useMyCalendars();
   const { data: sharedCalendarsData, isLoading: isLoadingShared } = useSharedCalendars();
+  const { data: settings } = useSettings();
   
   const myCalendars = myCalendarsData?.data || [];
   const sharedCalendars = sharedCalendarsData?.data || [];
@@ -49,57 +50,57 @@ export function CalendarProvider({ children }: CalendarProviderProps) {
   
   // Initialize active calendars once calendars are loaded
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isViewInitialized, setIsViewInitialized] = useState(false);
   
   useEffect(() => {
-    if (!isLoadingMy && !isLoadingShared && !isInitialized) {
-      const saved = localStorage.getItem('activeCalendars');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved) as number[];
-          const allIds = new Set(allCalendars.map(c => c.id));
-          const filtered = new Set(parsed.filter(id => allIds.has(id)));
-          // If no active calendars were saved or all filtered out, show all by default
-          setActiveCalendars(filtered.size > 0 ? filtered : new Set(allCalendars.map(c => c.id)));
-        } catch {
-          // Fallback to all calendars
-          setActiveCalendars(new Set(allCalendars.map(c => c.id)));
+    if (!isLoadingMy && !isLoadingShared) {
+      const allIds = allCalendars.map(c => c.id);
+      if (allIds.length > 0) {
+        if (!isInitialized) {
+          // First load: initialize with all calendars
+          setActiveCalendars(new Set(allIds));
+          setIsInitialized(true);
+        } else {
+          // Sub-sequent loads: ensure newly added calendars are also active
+          setActiveCalendars(prev => {
+            const newSet = new Set(prev);
+            let changed = false;
+            allIds.forEach(id => {
+              if (!newSet.has(id)) {
+                newSet.add(id);
+                changed = true;
+              }
+            });
+            return changed ? newSet : prev;
+          });
         }
-      } else {
-        // No saved state, initialize with all calendars
-        setActiveCalendars(new Set(allCalendars.map(c => c.id)));
       }
-      setIsInitialized(true);
     }
   }, [isLoadingMy, isLoadingShared, isInitialized, allCalendars]);
-  
-  // Keep active calendars in sync when calendars list changes (e.g., new calendar added)
-  useEffect(() => {
-    if (isInitialized && !isLoadingMy && !isLoadingShared) {
-      setActiveCalendars(prev => {
-        const allIds = new Set(allCalendars.map(c => c.id));
-        // Only keep IDs that still exist
-        const filtered = new Set([...prev].filter(id => allIds.has(id)));
-        return filtered;
-      });
-    }
-  }, [isLoadingMy, isLoadingShared, isInitialized, allCalendars]);
+
   const [view, setView] = useState<CalendarView>('month');
+
+  // Initialize view from settings
+  useEffect(() => {
+    if (settings?.data?.default_view && !isViewInitialized) {
+      setView(settings.data.default_view as CalendarView);
+      setIsViewInitialized(true);
+    }
+  }, [settings, isViewInitialized]);
+
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedCalendarId, setSelectedCalendarId] = useState<number | null>(null);
 
   const toggleCalendar = useCallback((calendarId: number) => {
     setActiveCalendars(prev => {
       const newSet = new Set(prev);
-      const hadIt = newSet.has(calendarId);
-      if (hadIt) {
+      if (newSet.has(calendarId)) {
         newSet.delete(calendarId);
       } else {
         newSet.add(calendarId);
       }
       // Save to localStorage
-      const arr = Array.from(newSet);
-      localStorage.setItem('activeCalendars', JSON.stringify(arr));
-      console.log(`Toggled calendar ${calendarId}. Active:`, arr);
+      localStorage.setItem('activeCalendars', JSON.stringify(Array.from(newSet)));
       return newSet;
     });
   }, []);

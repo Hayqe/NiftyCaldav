@@ -24,32 +24,11 @@ async def create_event(
     Create a new event in the specified calendar via CalDAV.
     User must have write access to the calendar.
     """
-    # Verify calendar exists and user has access
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_write = any(
-            share.user_id == current_user.id and share.permission in ["write", "admin"]
-            for share in shares
-        )
-        if not has_write:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No write permission for this calendar"
-            )
-    
     created_event = EventService.create_event(db, event, current_user.id, calendar_id)
     if not created_event:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create event in CalDAV"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found or failed to create event in CalDAV"
         )
     return created_event
 
@@ -72,9 +51,9 @@ async def list_events(
     return events
 
 
-@router.get("/{event_id}", response_model=EventInDB, summary="Get event by ID")
+@router.get("/get", response_model=EventInDB, summary="Get event by ID")
 async def get_event(
-    event_id: str,
+    event_id: str = Query(..., description="CalDAV URL or filename of the event"),
     calendar_id: int = Query(..., description="ID of the calendar containing the event"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -83,38 +62,20 @@ async def get_event(
     Get a specific event by its CalDAV URL.
     User must have read access to the calendar.
     """
-    # Verify calendar exists and user has access
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_read = any(share.user_id == current_user.id for share in shares)
-        if not has_read:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No read permission for this calendar"
-            )
-    
     event = EventService.get_event(db, event_id, current_user.id, calendar_id)
     if not event:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
+            detail="Event or calendar not found"
         )
     return event
 
 
-@router.put("/{event_id}", response_model=EventInDB, summary="Update event")
+@router.put("/update", response_model=EventInDB, summary="Update event")
 async def update_event(
-    event_id: str,
-    event: EventUpdate,
+    event_id: str = Query(..., description="CalDAV URL or filename of the event"),
     calendar_id: int = Query(..., description="ID of the calendar containing the event"),
+    event: EventUpdate = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
 ):
@@ -122,39 +83,18 @@ async def update_event(
     Update an existing event.
     User must have write access to the calendar.
     """
-    # Verify calendar exists and user has access
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_write = any(
-            share.user_id == current_user.id and share.permission in ["write", "admin"]
-            for share in shares
-        )
-        if not has_write:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No write permission for this calendar"
-            )
-    
     updated_event = EventService.update_event(db, event_id, event, current_user.id, calendar_id)
     if not updated_event:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found or failed to update"
+            detail="Event/calendar not found or failed to update"
         )
     return updated_event
 
 
-@router.delete("/{event_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete event")
+@router.delete("/delete", status_code=status.HTTP_204_NO_CONTENT, summary="Delete event")
 async def delete_event(
-    event_id: str,
+    event_id: str = Query(..., description="CalDAV URL or filename of the event"),
     calendar_id: int = Query(..., description="ID of the calendar containing the event"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user)
@@ -163,31 +103,10 @@ async def delete_event(
     Delete an event.
     User must have write access to the calendar.
     """
-    # Verify calendar exists and user has access
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_write = any(
-            share.user_id == current_user.id and share.permission in ["write", "admin"]
-            for share in shares
-        )
-        if not has_write:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No write permission for this calendar"
-            )
-    
     success = EventService.delete_event(db, event_id, current_user.id, calendar_id)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found or failed to delete"
+            detail="Event/calendar not found or failed to delete"
         )
     return None

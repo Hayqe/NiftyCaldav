@@ -3,6 +3,9 @@ CalDAV Client for interaction with Radicale server.
 Handles calendar management and event operations.
 """
 import os
+import re
+import requests
+from requests.auth import HTTPBasicAuth
 import caldav
 from typing import Optional, List, Dict, Any
 from datetime import datetime, date
@@ -62,13 +65,8 @@ class CalDAVClient:
     def get_calendar_color(self, calendar_url: str) -> Optional[str]:
         """Get the color of a calendar from Radicale via PROPFIND."""
         try:
-            import requests
-            from requests.auth import HTTPBasicAuth
-            import re
-            
             username = self.client.username if hasattr(self.client, 'username') else None
             password = self.client.password if hasattr(self.client, 'password') else "admin"
-            
             # Clean up URL (remove trailing slash)
             url = calendar_url.rstrip('/') + '/'
             
@@ -80,8 +78,9 @@ class CalDAVClient:
             )
             
             if response.status_code == 207:
-                # Parse color from XML response
-                match = re.search(r'<C:calendar-color>([^<]+)</C:calendar-color>', response.text)
+                # Parse color from XML response - handle both standard and namespaced tags
+                # Matches <[...]:calendar-color> OR <calendar-color>
+                match = re.search(r'<(?:[^:]+:)?calendar-color>([^<]+)</(?:[^:]+:)?calendar-color>', response.text)
                 if match:
                     return match.group(1)
         except Exception as e:
@@ -103,26 +102,43 @@ class CalDAVClient:
             result = []
             for calendar in calendars:
                 cal_url = str(calendar.url)
+                
+                # Fetch color
                 color = self.get_calendar_color(cal_url)
                 
-                # always extract name from URL to get just the calendar name
-                # URL format: http://radicale:5232/admin/TestCal/ -> TestCal
-                from urllib.parse import urlparse
-                path = urlparse(cal_url).path.strip('/')
-                parts = [p for p in path.split('/') if p]
-                cal_name = parts[-1] if parts else calendar.name or "Unknown"
+                # Try to get displayname property properly
+                # calendar.name in caldav library often returns DisplayName if available
+                cal_name = None
+                try:
+                    cal_name = calendar.get_property(caldav.dav.DisplayName())
+                except:
+                    pass
                 
-                # Try to get description from calendar object
-                cal_desc = getattr(calendar, 'description', None)
+                if not cal_name:
+                    cal_name = calendar.name
+                
+                # If still no name, extract from URL
+                if not cal_name or cal_name == cal_url:
+                    from urllib.parse import urlparse
+                    path = urlparse(cal_url).path.strip('/')
+                    parts = [p for p in path.split('/') if p]
+                    cal_name = parts[-1] if parts else "Unknown"
+                
+                # Try to get description property properly
+                cal_desc = ""
+                try:
+                    cal_desc = calendar.get_property(caldav.dav.CalendarDescription())
+                except:
+                    pass
+                
                 if not cal_desc:
-                    # Try to get description via PROPFIND
-                    cal_desc = ""
+                    cal_desc = getattr(calendar, 'description', "")
                 
                 result.append({
                     "name": cal_name,
                     "url": cal_url,
                     "description": cal_desc or "",
-                    "color": color or "blue",
+                    "color": color or "#3b82f6",
                     "owner_username": username,
                 })
             return result
@@ -169,43 +185,34 @@ class CalDAVClient:
             print(f"Error getting calendar '{calendar_name}': {e}")
             return None
     
-    def create_calendar(self, calendar_name: str, description: str = None) -> Optional[caldav.Calendar]:
+    def create_calendar(self, calendar_name: str, description: str = None, color: str = None) -> Optional[caldav.Calendar]:
         """Create a new calendar using MKCALENDAR."""
         if not self.is_connected():
             return None
-        
+
         try:
             # Save credentials
             username = self.client.username if hasattr(self.client, 'username') else None
             password = self.client.password if hasattr(self.client, 'password') else None
-            
-            # Use raw HTTP MKCALENDAR request
-            import requests
-            from requests.auth import HTTPBasicAuth
-            
+
             # Clean up calendar name (replace spaces with underscores for URL)
             # Remove username prefix if present (e.g., "admin/TestCal" -> "TestCal")
             clean_name = calendar_name.replace(' ', '_')
             if username and clean_name.startswith(username + '/'):
                 clean_name = clean_name[len(username) + 1:]
             url = f"{self.radicale_url}/{username}/{clean_name}/"
-            
-            # Generate random color for calendar
-            import random
-            colors = ['blue', 'green', 'red', 'orange', 'purple', 'pink', 'yellow']
-            calendar_color = random.choice(colors)
-            
-            # Build XML body with calendar color (CalDAV standard)
+
+            # Build XML body with calendar color (Apple CalDAV standard)
             xml_body = f'''<?xml version="1.0" encoding="utf-8" ?>
-<C:mkcalendar xmlns:C="urn:ietf:params:xml:ns:caldav">
-    <D:set xmlns:D="DAV:">
+    <C:mkcalendar xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav" xmlns:I="http://apple.com/ns/ical/">
+    <D:set>
         <D:prop>
             <D:displayname>{calendar_name}</D:displayname>
             <C:calendar-description>{description or ''}</C:calendar-description>
-            <C:calendar-color>{calendar_color}</C:calendar-color>
+            <I:calendar-color>{color or '#3b82f6'}</I:calendar-color>
         </D:prop>
     </D:set>
-</C:mkcalendar>'''
+    </C:mkcalendar>'''
             
             response = requests.request(
                 'MKCALENDAR',
@@ -252,18 +259,48 @@ class CalDAVClient:
         return False
     
     def delete_calendar(self, calendar_name: str) -> bool:
-        """Delete a calendar."""
+        """Delete a calendar from Radicale."""
         if not self.is_connected():
             return False
         
         try:
             calendar = self.get_calendar(calendar_name)
-            if calendar:
+            if calendar and hasattr(calendar, 'url') and calendar.url:
+                # The calendar.delete() method should work
+                # But sometimes the URL is None, so we need to use the URL from get_calendar
                 calendar.delete()
                 return True
+            
+            # Fallback: try with raw HTTP DELETE to the calendar URL
+            # Build the calendar URL manually
+            username = self.client.username if hasattr(self.client, 'username') else None
+            if username:
+                # Try different URL formats
+                import requests
+                from requests.auth import HTTPBasicAuth
+                
+                urls_to_try = [
+                    f"{self.radicale_url}/{username}/{calendar_name}/",
+                    f"{self.radicale_url}/{calendar_name}/",
+                ]
+                
+                for try_url in urls_to_try:
+                    try:
+                        response = requests.request(
+                            'DELETE',
+                            try_url,
+                            auth=HTTPBasicAuth(username, self.client.password if hasattr(self.client, 'password') else 'admin')
+                        )
+                        if response.status_code in (200, 204, 202, 404):
+                            return True
+                    except Exception:
+                        continue
+            
             return False
         except Exception as e:
             print(f"Error deleting calendar '{calendar_name}': {e}")
+            import traceback
+            traceback.print_exc()
             return False
     
     def get_events(self, calendar_name: str, start: datetime = None, end: datetime = None) -> List[Dict[str, Any]]:
