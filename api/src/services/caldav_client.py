@@ -371,22 +371,28 @@ class CalDAVClient:
                     # Get start datetime
                     start_obj = ic_comp.get('dtstart')
                     start_dt = start_obj.dt if start_obj else None
+                    is_all_day = False
+                    
+                    if start_dt and isinstance(start_dt, date) and not isinstance(start_dt, datetime):
+                        is_all_day = True
+                        # For all-day events, convert date to datetime for consistency in our API
+                        start_dt = datetime(start_dt.year, start_dt.month, start_dt.day)
+                    
                     # Normalize to naive datetime if timezone-aware
                     if start_dt and hasattr(start_dt, 'tzinfo') and start_dt.tzinfo is not None:
                         start_dt = start_dt.replace(tzinfo=None)
-                    # Convert date to datetime if needed
-                    if start_dt and isinstance(start_dt, date) and not isinstance(start_dt, datetime):
-                        start_dt = datetime(start_dt.year, start_dt.month, start_dt.day)
                     
                     # Get end datetime
                     end_obj = ic_comp.get('dtend')
                     end_dt = end_obj.dt if end_obj else None
+                    
+                    if end_dt and isinstance(end_dt, date) and not isinstance(end_dt, datetime):
+                        # For all-day events, end date is often the next day (non-inclusive)
+                        end_dt = datetime(end_dt.year, end_dt.month, end_dt.day)
+                    
                     # Normalize to naive datetime if timezone-aware
                     if end_dt and hasattr(end_dt, 'tzinfo') and end_dt.tzinfo is not None:
                         end_dt = end_dt.replace(tzinfo=None)
-                    # Convert date to datetime if needed
-                    if end_dt and isinstance(end_dt, date) and not isinstance(end_dt, datetime):
-                        end_dt = datetime(end_dt.year, end_dt.month, end_dt.day)
                     
                     # Get description - vText is already a string subclass
                     desc_obj = ic_comp.get('description')
@@ -405,6 +411,7 @@ class CalDAVClient:
                         "end": end_dt,
                         "description": description,
                         "location": location,
+                        "all_day": is_all_day,
                     })
                 except Exception as e:
                     print(f"Error parsing event: {e}")
@@ -451,10 +458,18 @@ class CalDAVClient:
             # Get start datetime
             start_obj = ic_comp.get('dtstart')
             start_dt = start_obj.dt if start_obj else None
+            is_all_day = False
+            
+            if start_dt and isinstance(start_dt, date) and not isinstance(start_dt, datetime):
+                is_all_day = True
+                start_dt = datetime(start_dt.year, start_dt.month, start_dt.day)
             
             # Get end datetime
             end_obj = ic_comp.get('dtend')
             end_dt = end_obj.dt if end_obj else None
+            
+            if end_dt and isinstance(end_dt, date) and not isinstance(end_dt, datetime):
+                end_dt = datetime(end_dt.year, end_dt.month, end_dt.day)
             
             # Get description - vText is already a string subclass
             desc_obj = ic_comp.get('description')
@@ -471,6 +486,7 @@ class CalDAVClient:
                 "end": end_dt,
                 "description": description,
                 "location": location,
+                "all_day": is_all_day,
             }
         except Exception as e:
             print(f"Error getting event: {e}")
@@ -485,7 +501,8 @@ class CalDAVClient:
         start: datetime, 
         end: datetime,
         description: str = None,
-        location: str = None
+        location: str = None,
+        all_day: bool = False
     ) -> Optional[str]:
         """Create a new event in a calendar. Returns the event URL if successful."""
         calendar = self.get_calendar(calendar_name)
@@ -500,8 +517,21 @@ class CalDAVClient:
             
             event = icalendar.Event()
             event.add('summary', vText(summary))
-            event.add('dtstart', start)
-            event.add('dtend', end)
+            
+            if all_day:
+                # For all-day events, use date instead of datetime
+                # Handle cases where start might be a date or datetime object
+                d_start = start.date() if isinstance(start, datetime) else start
+                d_end = end.date() if isinstance(end, datetime) else end
+                
+                event.add('dtstart', d_start)
+                # In iCalendar, dtend for all-day events is non-inclusive (the day after)
+                # If it's a 1-day event (start=April 30, end=April 30), DTEND must be May 1
+                inclusive_end = d_end + timedelta(days=1)
+                event.add('dtend', inclusive_end)
+            else:
+                event.add('dtstart', start)
+                event.add('dtend', end)
             
             if description:
                 event.add('description', vText(description))
@@ -539,7 +569,8 @@ class CalDAVClient:
         start: datetime,
         end: datetime,
         description: str = None,
-        location: str = None
+        location: str = None,
+        all_day: bool = False
     ) -> bool:
         """Update an existing event in CalDAV."""
         try:
@@ -577,8 +608,18 @@ class CalDAVClient:
             
             new_event = icalendar.Event()
             new_event.add('summary', vText(summary))
-            new_event.add('dtstart', start)
-            new_event.add('dtend', end)
+            
+            if all_day:
+                d_start = start.date() if isinstance(start, datetime) else start
+                d_end = end.date() if isinstance(end, datetime) else end
+                
+                new_event.add('dtstart', d_start)
+                # DTEND is exclusive for all-day events
+                new_event.add('dtend', d_end + timedelta(days=1))
+            else:
+                new_event.add('dtstart', start)
+                new_event.add('dtend', end)
+            
             new_event.add('uid', uid)
             
             if description:

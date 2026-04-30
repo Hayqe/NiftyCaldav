@@ -5,7 +5,7 @@ export function useSettings() {
   return useQuery({
     queryKey: ['settings'],
     queryFn: settingsApi.get,
-    staleTime: 1000 * 60 * 60, // 1 hour
+    staleTime: 1000 * 60 * 5, // 5 minutes
   });
 }
 

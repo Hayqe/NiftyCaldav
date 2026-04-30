@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO } from 'date-fns';
+import React, { useState } from 'react';
+import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO, addMinutes, getWeek } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { MapPin } from 'lucide-react';
+import { MapPin, Plus } from 'lucide-react';
 import { useCalendarContext } from '@/context/CalendarContext';
 import { useEvents, useCreateEvent, useUpdateEvent, useSettings } from '@/hooks';
 import type { Event } from '@/types';
@@ -30,7 +30,8 @@ export default function HomePage() {
     getActiveCalendarIds,
   } = useCalendarContext();
 
-  const { data: settings } = useSettings();
+  const { data: settingsResponse } = useSettings();
+  const settings = settingsResponse?.data;
 
   const activeCalendarIds = getActiveCalendarIds();
   
@@ -65,11 +66,25 @@ export default function HomePage() {
     const grouped = new Map<string, typeof events>();
     
     events.forEach(event => {
-      const dateKey = format(parseISO(event.start), 'yyyy-MM-dd');
-      if (!grouped.has(dateKey)) {
-        grouped.set(dateKey, []);
-      }
-      grouped.get(dateKey)?.push(event);
+      const startDate = parseISO(event.start);
+      const endDate = parseISO(event.end);
+      
+      // Get all days between start and end
+      const days = eachDayOfInterval({
+        start: startOfDay(startDate),
+        end: startOfDay(endDate)
+      });
+      
+      days.forEach(day => {
+        const dateKey = format(day, 'yyyy-MM-dd');
+        if (!grouped.has(dateKey)) {
+          grouped.set(dateKey, []);
+        }
+        // Avoid duplicates if the interval logic is overlapping
+        if (!grouped.get(dateKey)?.find(e => e.id === event.id)) {
+          grouped.get(dateKey)?.push(event);
+        }
+      });
     });
     
     return grouped;
@@ -100,16 +115,25 @@ export default function HomePage() {
 
   // Handle cell click for event creation
   const handleDateClick = (date: Date) => {
-    const calendarId = activeCalendarIds.length > 0 ? activeCalendarIds[0] : null;
+    const defaultCalId = settings?.default_calendar_id;
+    const calendarId = (defaultCalId && [...myCalendars, ...sharedCalendars].find(c => c.id === defaultCalId)) 
+      ? defaultCalId 
+      : (activeCalendarIds.length > 0 ? activeCalendarIds[0] : null);
+      
     if (calendarId) {
+      const duration = settings?.default_duration || 60;
+      const startDateTime = new Date(date);
+      startDateTime.setHours(9, 0, 0, 0);
+      const endDateTime = addMinutes(startDateTime, duration);
+
       setSelectedEventDate(date);
       setSelectedEventCalendarId(calendarId);
       setEventFormData({
         ...eventFormData,
         title: '',
         description: '',
-        start: format(date, "yyyy-MM-dd'T'09:00:00"),
-        end: format(date, "yyyy-MM-dd'T'10:00:00"),
+        start: format(startDateTime, "yyyy-MM-dd'T'HH:mm:00"),
+        end: format(endDateTime, "yyyy-MM-dd'T'HH:mm:00"),
         all_day: false,
         location: '',
       });
@@ -122,6 +146,16 @@ export default function HomePage() {
     if (!selectedEventCalendarId || !eventFormData?.title?.trim()) return;
 
     try {
+      let start = eventFormData.start;
+      let end = eventFormData.end;
+
+      if (eventFormData.all_day) {
+        // For all-day events, use only the date part (YYYY-MM-DD)
+        // This ensures the backend/CalDAV treats it as a true DATE value without time
+        start = eventFormData.start.split('T')[0];
+        end = eventFormData.end.split('T')[0];
+      }
+
       if (editingEvent) {
         // Update existing event
         await updateEventMutation.mutateAsync({
@@ -130,8 +164,8 @@ export default function HomePage() {
           event: {
             title: eventFormData.title,
             description: eventFormData.description || null,
-            start: eventFormData.start,
-            end: eventFormData.end,
+            start: start,
+            end: end,
             all_day: eventFormData.all_day,
             location: eventFormData.location || null,
           },
@@ -143,8 +177,8 @@ export default function HomePage() {
           event: {
             title: eventFormData.title,
             description: eventFormData.description || null,
-            start: eventFormData.start,
-            end: eventFormData.end,
+            start: start,
+            end: end,
             all_day: eventFormData.all_day,
             location: eventFormData.location || null,
             recurring: false,
@@ -235,7 +269,12 @@ export default function HomePage() {
         </div>
         
         {/* Weekday headers */}
-        <div className="grid grid-cols-7 gap-px bg-gray-200">
+        <div className={cn("grid gap-px bg-gray-200", settings?.show_week_numbers ? "grid-cols-[40px_repeat(7,1fr)]" : "grid-cols-7")}>
+          {settings?.show_week_numbers && (
+            <div className="bg-gray-50 p-3 text-center text-[10px] font-bold text-gray-400 uppercase flex items-center justify-center">
+              Wk
+            </div>
+          )}
           {WEEKDAYS.map(day => (
             <div key={day} className="bg-white p-3 text-center text-sm font-medium text-gray-500">
               {day}
@@ -244,71 +283,80 @@ export default function HomePage() {
         </div>
         
         {/* Calendar grid */}
-        <div className="grid grid-cols-7 gap-px bg-gray-200">
+        <div className={cn("grid gap-px bg-gray-200", settings?.show_week_numbers ? "grid-cols-[40px_repeat(7,1fr)]" : "grid-cols-7")}>
           {calendarDays.map((date, index) => {
             const dayEvents = getEventsForDay(date);
             const isSelected = isSameDay(date, selectedDate);
             const isCurrentMonth = date.getMonth() === selectedDate.getMonth();
             const isToday = isSameDay(date, today);
             const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+            const showWeekNum = settings?.show_week_numbers && (index % 7 === 0);
             
             return (
-              <div
-                key={index}
-                className={cn(
-                  'relative p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
-                  isSelected ? 'bg-primary-50' : 'bg-white'
+              <React.Fragment key={index}>
+                {showWeekNum && (
+                  <div className="bg-gray-50 flex items-center justify-center text-[11px] font-bold text-gray-400 border-r border-gray-100">
+                    {getWeek(date, { weekStartsOn: 1 })}
+                  </div>
                 )}
-                style={
-                  settings?.data?.highlight_weekend && isWeekend
-                    ? { backgroundColor: '#FEF9C3' }
-                    : undefined
-                }
-                onClick={() => handleDateClick(date)}
-              >
-                {/* Day number */}
-                <div className="mb-1">
-                  <span
-                    className={cn(
-                      'text-sm font-medium',
-                      isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
-                      isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
-                    )}
-                  >
-                    {date.getDate()}
-                  </span>
-                </div>
-                
-                {/* Events */}
-                <div className="space-y-1">
-                  {dayEvents.slice(0, 3).map((event, eventIndex) => {
-                    const color = getCalendarColor(event.calendar_id);
-                    const startTime = format(parseISO(event.start), 'HH:mm');
-                    return (
-                      <div
-                        key={eventIndex}
-                        className="px-1 py-0.5 rounded text-xs cursor-pointer"
-                        style={{ backgroundColor: color }}
-                        title={`${startTime} - ${format(parseISO(event.end), 'HH:mm')}: ${event.title}`}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditEvent(event);
-                        }}
-                      >
-                        <div className="flex items-center gap-1">
-                          <span className="text-white font-bold">{startTime} {event.title}</span>
-                          {event.location && <MapPin className="w-3 h-3 text-white/80" />}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {dayEvents.length > 3 && (
-                    <div className="px-1 py-0.5 rounded text-xs text-gray-500 bg-gray-100">
-                      +{dayEvents.length - 3} meer
-                    </div>
+                <div
+                  className={cn(
+                    'relative p-2 min-h-[120px] hover:bg-gray-50 cursor-pointer transition-colors',
+                    isSelected ? 'bg-primary-50' : 'bg-white'
                   )}
+                  style={
+                    settings?.highlight_weekend && isWeekend
+                      ? { backgroundColor: '#FFF7ED' }
+                      : undefined
+                  }
+                  onClick={() => handleDateClick(date)}
+                >
+                  {/* Day number */}
+                  <div className="mb-1">
+                    <span
+                      className={cn(
+                        'text-sm font-medium',
+                        isToday && !isSelected ? 'bg-primary-600 text-white px-2 py-0.5 rounded' : '',
+                        isCurrentMonth ? 'text-gray-700' : 'text-gray-400'
+                      )}
+                    >
+                      {date.getDate()}
+                    </span>
+                  </div>
+                  
+                  {/* Events */}
+                  <div className="space-y-1">
+                    {dayEvents.slice(0, 3).map((event, eventIndex) => {
+                      const color = getCalendarColor(event.calendar_id);
+                      const startTime = format(parseISO(event.start), 'HH:mm');
+                      return (
+                        <div
+                          key={eventIndex}
+                          className="px-1 py-0.5 rounded text-xs cursor-pointer"
+                          style={{ backgroundColor: color }}
+                          title={event.all_day ? `Hele dag: ${event.title}` : `${startTime} - ${format(parseISO(event.end), 'HH:mm')}: ${event.title}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEditEvent(event);
+                          }}
+                        >
+                          <div className="flex items-center gap-1">
+                            <span className="text-white font-bold">
+                              {event.all_day ? '' : `${startTime} `}{event.title}
+                            </span>
+                            {event.location && <MapPin className="w-3 h-3 text-white/80" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {dayEvents.length > 3 && (
+                      <div className="px-1 py-0.5 rounded text-xs text-gray-500 bg-gray-100">
+                        +{dayEvents.length - 3} meer
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -357,6 +405,31 @@ export default function HomePage() {
               </div>
             ))}
             
+            {/* All-day events row */}
+            <div className="bg-gray-50 p-2 text-right text-[10px] font-bold text-gray-400 border-b border-gray-200 sticky top-[70px] left-0 z-40">
+              Hele dag
+            </div>
+            {weekDays.map((day, dayIndex) => {
+              const dayKey = format(day, 'yyyy-MM-dd');
+              const dayEvents = eventsByDate.get(dayKey) || [];
+              const allDayEvents = dayEvents.filter(e => e.all_day);
+              
+              return (
+                <div key={`allday-${dayIndex}`} className="bg-white p-1 border-b border-gray-200 sticky top-[70px] z-30 min-h-[40px]">
+                  {allDayEvents.map(event => (
+                    <div
+                      key={event.id}
+                      className="mb-1 px-1.5 py-0.5 rounded text-[10px] font-bold text-white truncate cursor-pointer shadow-sm"
+                      style={{ backgroundColor: getCalendarColor(event.calendar_id) }}
+                      onClick={() => handleEditEvent(event)}
+                    >
+                      {event.title}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+
             {/* Time slots column - Sticky to left */}
             <div className="bg-white sticky left-0 z-20 border-r border-gray-100">
               {(() => {
@@ -375,7 +448,7 @@ export default function HomePage() {
             {/* Days columns with events as blocks in multiple lanes */}
             {weekDays.map((day, dayIndex) => {
               const dayKey = format(day, 'yyyy-MM-dd');
-              const dayEvents = eventsByDate.get(dayKey) || [];
+              const dayEvents = (eventsByDate.get(dayKey) || []).filter(e => !e.all_day);
               const isWeekend = dayIndex >= 5;
 
               // Sort events by start time
@@ -390,8 +463,8 @@ export default function HomePage() {
                     "relative border-b border-gray-200 min-h-[1440px]"
                   )} 
                   style={
-                    settings?.data?.highlight_weekend && isWeekend
-                      ? { backgroundColor: '#FEF9C3' }
+                    settings?.highlight_weekend && isWeekend
+                      ? { backgroundColor: '#FFF7ED' }
                       : { backgroundColor: 'white' }
                   }
                   onClick={() => handleDateClick(day)}
@@ -526,6 +599,23 @@ export default function HomePage() {
               {format(selectedDate, 'EEEE d MMMM', { locale: nl })}
             </div>
             
+            {/* All-day section */}
+            <div className="bg-gray-50 p-2 text-right text-[10px] font-bold text-gray-400 border-b border-gray-200 sticky top-[70px] left-0 z-40">
+              Hele dag
+            </div>
+            <div className="bg-white p-2 border-b border-gray-200 sticky top-[70px] z-30 min-h-[40px]">
+              {events.filter(e => e.all_day).map(event => (
+                <div
+                  key={event.id}
+                  className="mb-1 px-3 py-1 rounded text-xs font-bold text-white cursor-pointer shadow-sm inline-block mr-2"
+                  style={{ backgroundColor: getCalendarColor(event.calendar_id) }}
+                  onClick={() => handleEditEvent(event)}
+                >
+                  {event.title}
+                </div>
+              ))}
+            </div>
+
             {/* Time slots column - Sticky to left */}
             <div className="bg-white sticky left-0 z-20 border-r border-gray-100">
               {(() => {
@@ -545,8 +635,8 @@ export default function HomePage() {
             <div 
               className="relative min-h-[1440px]" 
               style={
-                settings?.data?.highlight_weekend && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
-                  ? { backgroundColor: '#FEF9C3' }
+                settings?.highlight_weekend && (selectedDate.getDay() === 0 || selectedDate.getDay() === 6)
+                  ? { backgroundColor: '#FFF7ED' }
                   : { backgroundColor: 'white' }
               }
               onClick={() => handleDateClick(selectedDate)}
@@ -558,7 +648,7 @@ export default function HomePage() {
 
               {(() => {
                 // Sort events by start time
-                const sortedEvents = [...events].sort((a, b) => 
+                const sortedEvents = events.filter(e => !e.all_day).sort((a, b) => 
                   parseISO(a.start).getTime() - parseISO(b.start).getTime()
                 );
                 
@@ -677,81 +767,139 @@ export default function HomePage() {
   };
 
   const renderListView = () => {
+    // Group events by day and sort dates
+    const sortedDates = Array.from(eventsByDate.keys()).sort();
+    
+    if (sortedDates.length === 0) {
+      return (
+        <div className="bg-white rounded-xl border border-gray-200 p-12 text-center">
+          <p className="text-gray-500 mb-4">Geen events gevonden voor de geselecteerde periode</p>
+          <button 
+            onClick={() => handleDateClick(new Date())}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Nieuw event</span>
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-semibold text-gray-900">Agenda Lijst</h2>
-        </div>
-        <div className="divide-y divide-gray-200">
-          {events.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              Geen events gevonden voor de geselecteerde periode
-            </div>
-          ) : (
-            events.map((event, index) => {
-              const calendar = [...myCalendars, ...sharedCalendars].find(
-                c => c.id === event.calendar_id
-              );
-              const color = getCalendarColor(event.calendar_id);
-              
-              return (
-                <div 
-                  key={index} 
-                  className="p-6 hover:bg-gray-50 transition-colors cursor-pointer"
-                  onClick={() => handleEditEvent(event)}
-                >
-                  <div className="flex items-start gap-4">
-                    <div
-                      className="w-12 h-12 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: color + '20' }}
-                    >
-                      <div
-                        className="w-6 h-6 rounded-full mx-auto mt-2"
-                        style={{ backgroundColor: color }}
-                      />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-gray-900 truncate">{event.title}</h3>
-                      <div className="flex items-center gap-4 mt-2 text-sm text-gray-600">
-                        <span>
-                          {format(parseISO(event.start), 'EEEE d MMMM yyyy', { locale: nl })}
-                        </span>
-                        <span className="text-gray-400">
-                          {format(parseISO(event.start), 'HH:mm', { locale: nl })} - 
-                          {format(parseISO(event.end), 'HH:mm', { locale: nl })}
-                        </span>
-                      </div>
-                      {event.location && (
-                        <div className="flex items-center gap-2 mt-2 text-sm text-gray-600">
-                          <MapPin className="w-4 h-4" />
-                          <span>{event.location}</span>
-                        </div>
-                      )}
-                      {event.description && (
-                        <p className="mt-2 text-sm text-gray-600 line-clamp-2">{event.description}</p>
-                      )}
-                      {calendar && (
-                        <div className="mt-2">
-                          <span
-                            className="inline-block px-2 py-0.5 rounded-full text-xs font-medium"
-                            style={{
-                              backgroundColor: calendar.color ?
-                                CALENDAR_COLORS.find(c => c.value === calendar.color)?.hex + '20' : '#e0f2fe',
-                              color: calendar.color ?
-                                CALENDAR_COLORS.find(c => c.value === calendar.color)?.hex : '#0ea5e9'
-                            }}
-                          >
-                            {calendar.name}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+      <div className="space-y-12 pb-12">
+        {sortedDates.map((dateKey) => {
+          const date = parseISO(dateKey);
+          const dayEvents = eventsByDate.get(dateKey) || [];
+          const sortedDayEvents = [...dayEvents].sort((a, b) => 
+            parseISO(a.start).getTime() - parseISO(b.start).getTime()
+          );
+
+          return (
+            <div key={dateKey} className="flex gap-8 md:gap-16">
+              {/* Left column: Date and Add button */}
+              <div className="w-24 md:w-32 flex flex-col items-center pt-2 shrink-0">
+                <div className="text-5xl font-black text-gray-900 tracking-tighter">
+                  {format(date, 'dd')}
                 </div>
-              );
-            })
-          )}
-        </div>
+                <div className="text-sm font-bold text-gray-400 uppercase tracking-widest mt-1">
+                  {format(date, 'EEEE', { locale: nl })}
+                </div>
+                
+                <button
+                  onClick={() => handleDateClick(date)}
+                  className="mt-6 p-3 rounded-full bg-gray-50 text-gray-400 hover:bg-primary-50 hover:text-primary-600 transition-all group border border-gray-100 hover:border-primary-100 shadow-sm"
+                  title="Event toevoegen"
+                >
+                  <Plus className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </button>
+              </div>
+
+              {/* Right column: Timeline and Events */}
+              <div className="flex-1 relative">
+                {/* Vertical timeline line */}
+                <div className="absolute left-2 top-4 bottom-0 w-px bg-gradient-to-b from-gray-200 via-gray-200 to-transparent" />
+
+                <div className="space-y-8 pt-4">
+                  {sortedDayEvents
+                    .filter(event => isSameDay(parseISO(event.start), date))
+                    .map((event, idx) => {
+                    const color = getCalendarColor(event.calendar_id);
+                    const isPast = parseISO(event.end) < new Date();
+                    const startTime = format(parseISO(event.start), 'HH:mm');
+                    const endTime = format(parseISO(event.end), 'HH:mm');
+                    const startDateLabel = format(parseISO(event.start), 'd MMM', { locale: nl });
+                    const endDateLabel = format(parseISO(event.end), 'd MMM', { locale: nl });
+                    const isMultiDay = !isSameDay(parseISO(event.start), parseISO(event.end));
+                    const calendar = [...myCalendars, ...sharedCalendars].find(
+                      c => c.id === event.calendar_id
+                    );
+
+                    return (
+                      <div key={event.id} className={cn("relative pl-10 group", isPast ? "opacity-50" : "")}>
+                        {/* Timeline Bullet */}
+                        <div 
+                          className="absolute left-0 top-1.5 w-4 h-4 rounded-full border-4 border-white shadow-sm z-10 transition-transform group-hover:scale-125"
+                          style={{ backgroundColor: isPast ? '#9ca3af' : color }}
+                        />
+
+                        <div 
+                          className={cn(
+                            "bg-white rounded-2xl p-5 border transition-all cursor-pointer",
+                            isPast 
+                              ? "border-gray-100 shadow-none grayscale" 
+                              : "border-gray-100 shadow-sm hover:shadow-md group-hover:border-gray-200"
+                          )}
+                          onClick={() => handleEditEvent(event)}
+                        >
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-3">
+                                <span className={cn("text-sm font-bold", isPast ? "text-gray-400" : "text-gray-400")}>
+                                  {event.all_day 
+                                    ? (isMultiDay ? `${startDateLabel} — ${endDateLabel}` : 'Hele dag') 
+                                    : `${startTime} — ${endTime}`}
+                                </span>
+                                {calendar && (
+                                  <span 
+                                    className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                                    style={{ 
+                                      backgroundColor: isPast ? '#f3f4f6' : color + '15',
+                                      color: isPast ? '#6b7280' : color 
+                                    }}
+                                  >
+                                    {calendar.name}
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className={cn(
+                                "text-lg font-bold transition-colors",
+                                isPast ? "text-gray-500" : "text-gray-900 group-hover:text-primary-600"
+                              )}>
+                                {event.title}
+                              </h3>
+                              {event.location && (
+                                <div className="flex items-center gap-1.5 text-sm text-gray-500">
+                                  <MapPin className="w-3.5 h-3.5" />
+                                  <span>{event.location}</span>
+                                </div>
+                              )}
+                            </div>
+                            
+                            {event.description && (
+                              <p className="text-sm text-gray-400 line-clamp-1 md:max-w-xs italic">
+                                "{event.description}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     );
   };
@@ -837,10 +985,16 @@ export default function HomePage() {
                     Begint
                   </label>
                   <input
-                    type="datetime-local"
-                    value={eventFormData.start}
-                    onChange={(e) => setEventFormData({ ...eventFormData, start: e.target.value })}
-                    className="input"
+                    type={eventFormData.all_day ? "date" : "datetime-local"}
+                    value={eventFormData.all_day ? eventFormData.start.split('T')[0] : eventFormData.start}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEventFormData({ 
+                        ...eventFormData, 
+                        start: eventFormData.all_day ? `${val}T00:00:00` : val 
+                      });
+                    }}
+                    className={cn("input", eventFormData.all_day ? "bg-gray-50 text-gray-500" : "")}
                   />
                 </div>
                 <div>
@@ -848,10 +1002,16 @@ export default function HomePage() {
                     Eindigt
                   </label>
                   <input
-                    type="datetime-local"
-                    value={eventFormData.end}
-                    onChange={(e) => setEventFormData({ ...eventFormData, end: e.target.value })}
-                    className="input"
+                    type={eventFormData.all_day ? "date" : "datetime-local"}
+                    value={eventFormData.all_day ? eventFormData.end.split('T')[0] : eventFormData.end}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEventFormData({ 
+                        ...eventFormData, 
+                        end: eventFormData.all_day ? `${val}T23:59:59` : val 
+                      });
+                    }}
+                    className={cn("input", eventFormData.all_day ? "bg-gray-50 text-gray-500" : "")}
                   />
                 </div>
               </div>

@@ -104,7 +104,8 @@ class EventService:
                 start=event.start,
                 end=event.end,
                 description=event.description,
-                location=event.location
+                location=event.location,
+                all_day=event.all_day
             )
             
             if event_url:
@@ -116,6 +117,7 @@ class EventService:
                     end=event.end,
                     description=event.description,
                     location=event.location,
+                    all_day=event.all_day,
                     calendar_id=calendar_id,
                     calendar_name=calendar_name,
                     created_at=datetime.utcnow()
@@ -156,7 +158,7 @@ class EventService:
                     end=event_data.get('end'),
                     description=event_data.get('description'),
                     location=event_data.get('location'),
-                    all_day=False,
+                    all_day=event_data.get('all_day', False),
                     recurring=False,
                     recurrence_rule=None,
                     color=None,
@@ -239,7 +241,7 @@ class EventService:
                             end=event_data.get('end'),
                             description=event_data.get('description'),
                             location=event_data.get('location'),
-                            all_day=False,
+                            all_day=event_data.get('all_day', False),
                             recurring=False,
                             recurrence_rule=None,
                             color=None,
@@ -280,16 +282,17 @@ class EventService:
         
         try:
             # Get old event to preserve any missing fields
-            old_event = client.get_event(calendar_path, event_id)
-            if not old_event:
+            old_event_data = client.get_event(calendar_path, event_id)
+            if not old_event_data:
                 return None
             
             # Use provided data or fall back to old data
-            summary = event.summary if event.summary else old_event.get('summary', 'Unnamed Event')
-            start = event.start if event.start else old_event.get('start')
-            end = event.end if event.end else old_event.get('end')
-            description = event.description if event.description is not None else old_event.get('description')
-            location = event.location if event.location is not None else old_event.get('location')
+            summary = event.summary if event.summary else old_event_data.get('summary', 'Unnamed Event')
+            start = event.start if event.start else old_event_data.get('start')
+            end = event.end if event.end else old_event_data.get('end')
+            description = event.description if event.description is not None else old_event_data.get('description')
+            location = event.location if event.location is not None else old_event_data.get('location')
+            all_day = event.all_day if event.all_day is not None else old_event_data.get('all_day', False)
             
             # We need just the calendar name for client.update_event
             # which extracts the name from calendar_path if it has /
@@ -302,7 +305,8 @@ class EventService:
                 start=start,
                 end=end,
                 description=description,
-                location=location
+                location=location,
+                all_day=all_day
             )
             
             if success:
@@ -314,6 +318,7 @@ class EventService:
                     end=end,
                     description=description,
                     location=location,
+                    all_day=all_day,
                     calendar_id=calendar_id,
                     calendar_name=calendar_name,
                     updated_at=datetime.utcnow()
