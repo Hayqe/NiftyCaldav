@@ -8,7 +8,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 import caldav
 from typing import Optional, List, Dict, Any
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import icalendar
 from icalendar import vCalAddress, vText
 import uuid
@@ -494,6 +494,48 @@ class CalDAVClient:
             traceback.print_exc()
             return None
     
+    def save_event_to_calendar(
+        self,
+        calendar: caldav.Calendar,
+        summary: str,
+        start: datetime,
+        end: datetime,
+        description: str = None,
+        location: str = None,
+        all_day: bool = False
+    ) -> Optional[str]:
+        """Low-level method to save an event directly to a calendar object."""
+        try:
+            cal = icalendar.Calendar()
+            cal.add('prodid', '-//NiftyCaldav//NiftyCaldav//EN')
+            cal.add('version', '2.0')
+            
+            event = icalendar.Event()
+            event.add('summary', vText(summary))
+            
+            if all_day:
+                d_start = start.date() if isinstance(start, datetime) else start
+                d_end = end.date() if isinstance(end, datetime) else end
+                event.add('dtstart', d_start)
+                event.add('dtend', d_end + timedelta(days=1))
+            else:
+                event.add('dtstart', start)
+                event.add('dtend', end)
+            
+            if description:
+                event.add('description', vText(description))
+            if location:
+                event.add('location', vText(location))
+            
+            event.add('uid', str(uuid.uuid4()) + '@niftycaldav')
+            cal.add_component(event)
+            
+            new_event = calendar.save_event(cal)
+            return str(new_event.url) if new_event and hasattr(new_event, 'url') else None
+        except Exception as e:
+            print(f"Error saving event to calendar object: {e}", flush=True)
+            return None
+
     def create_event(
         self, 
         calendar_name: str, 
@@ -504,62 +546,11 @@ class CalDAVClient:
         location: str = None,
         all_day: bool = False
     ) -> Optional[str]:
-        """Create a new event in a calendar. Returns the event URL if successful."""
+        """Create a new event in a calendar by name. Performs lookup every time."""
         calendar = self.get_calendar(calendar_name)
         if not calendar:
             return None
-        
-        try:
-            # Create iCalendar component
-            cal = icalendar.Calendar()
-            cal.add('prodid', '-//NiftyCaldav//NiftyCaldav//EN')
-            cal.add('version', '2.0')
-            
-            event = icalendar.Event()
-            event.add('summary', vText(summary))
-            
-            if all_day:
-                # For all-day events, use date instead of datetime
-                # Handle cases where start might be a date or datetime object
-                d_start = start.date() if isinstance(start, datetime) else start
-                d_end = end.date() if isinstance(end, datetime) else end
-                
-                event.add('dtstart', d_start)
-                # In iCalendar, dtend for all-day events is non-inclusive (the day after)
-                # If it's a 1-day event (start=April 30, end=April 30), DTEND must be May 1
-                inclusive_end = d_end + timedelta(days=1)
-                event.add('dtend', inclusive_end)
-            else:
-                event.add('dtstart', start)
-                event.add('dtend', end)
-            
-            if description:
-                event.add('description', vText(description))
-            if location:
-                event.add('location', vText(location))
-            
-            # Add unique UID
-            event.add('uid', str(uuid.uuid4()) + '@niftycaldav')
-            
-            cal.add_component(event)
-            
-            # Save to calendar
-            calendar.save_event(cal)
-            
-            # Return the URL of the created event
-            # Get the latest event (which should be the one we just created)
-            events = calendar.events()
-            if events:
-                # Get the most recent event
-                latest_event = events[-1]
-                return str(latest_event.url)
-            return None
-            
-        except Exception as e:
-            print(f"Error creating event: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
+        return self.save_event_to_calendar(calendar, summary, start, end, description, location, all_day)
     
     def update_event(
         self,

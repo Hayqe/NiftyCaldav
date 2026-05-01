@@ -25,35 +25,14 @@ async def import_ics(
 ):
     """
     Import an ICS file into a calendar.
-    
-    The file should be uploaded as multipart/form-data with field name 'file'.
-    
-    User must have write access to the specified calendar.
     """
-    # Verify calendar exists
-    calendar = CalendarService.get_calendar(db, calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, calendar_id)
-        has_write = any(
-            share.user_id == current_user.id and share.permission in ["write", "admin"]
-            for share in shares
-        )
-        if not has_write:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No write permission for this calendar"
-            )
-    
+    print(f"[ROUTE] Received ICS import request for calendar {calendar_id}", flush=True)
     try:
         # Read file content
+        print(f"[ROUTE] Reading file: {file.filename}", flush=True)
         content = await file.read()
+        print(f"[ROUTE] File read complete. Size: {len(content)} bytes", flush=True)
+        
         ics_content = content.decode('utf-8')
         
         # Import ICS
@@ -62,11 +41,13 @@ async def import_ics(
         )
         
         if not success:
+            print(f"[ROUTE] Import failed: {message}", flush=True)
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=message
             )
         
+        print(f"[ROUTE] Import successful: {imported_count} events", flush=True)
         return ICSImportResult(
             success=True,
             message=message,
@@ -76,6 +57,9 @@ async def import_ics(
         )
         
     except Exception as e:
+        print(f"[ROUTE] CRITICAL ERROR: {str(e)}", flush=True)
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to import ICS file: {str(e)}"
@@ -91,31 +75,8 @@ async def import_ics_from_url(
 ):
     """
     Import an ICS file from a URL into a calendar.
-    
-    This allows importing from public ICS calendar feeds.
     """
     import httpx
-    
-    # Verify calendar exists
-    calendar = CalendarService.get_calendar(db, request.calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found"
-        )
-    
-    # Check permissions
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
-        shares = CalendarService.get_shares_for_calendar(db, request.calendar_id)
-        has_write = any(
-            share.user_id == current_user.id and share.permission in ["write", "admin"]
-            for share in shares
-        )
-        if not has_write:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No write permission for this calendar"
-            )
     
     try:
         # Fetch ICS from URL
@@ -149,6 +110,8 @@ async def import_ics_from_url(
             detail=f"Failed to fetch ICS from URL: {str(e)}"
         )
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to import ICS file: {str(e)}"
