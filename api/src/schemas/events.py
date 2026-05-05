@@ -1,13 +1,13 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
-from datetime import datetime
+from typing import Optional, List, Union
+from datetime import datetime, date
 
 
 class EventBase(BaseModel):
     summary: str = Field(..., min_length=1, max_length=255)
-    start: datetime
-    end: datetime
-
+    start: Union[datetime, date]
+    end: Union[datetime, date]
+    all_day: bool = False
 
 class EventCreate(EventBase):
     description: Optional[str] = None

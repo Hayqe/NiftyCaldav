@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, ReactNode, useRef } from 'react';
 import { useMyCalendars, useSharedCalendars, useSettings } from '@/hooks';
 import type { Calendar, CalendarView } from '@/types';
 
@@ -43,35 +43,53 @@ export function CalendarProvider({ children }: CalendarProviderProps) {
   const myCalendars = myCalendarsData?.data || [];
   const sharedCalendars = sharedCalendarsData?.data || [];
   const allCalendars = [...myCalendars, ...sharedCalendars];
-  const allCalendarIds = new Set(allCalendars.map(c => c.id));
   
-  // Load active calendars from localStorage, filtering out non-existent IDs
+  // Load active calendars from localStorage
   const [activeCalendars, setActiveCalendars] = useState<Set<number>>(new Set());
   
-  // Initialize active calendars once calendars are loaded
+  // Track calendars we've seen to detect truly new ones
+  const seenCalendarIds = useRef<Set<number>>(new Set());
   const [isInitialized, setIsInitialized] = useState(false);
   const [isViewInitialized, setIsViewInitialized] = useState(false);
   
   useEffect(() => {
-    if (!isLoadingMy && !isLoadingShared) {
+    if (!isLoadingMy && !isLoadingShared && allCalendars.length > 0) {
       const allIds = allCalendars.map(c => c.id);
-      if (allIds.length > 0) {
-        if (!isInitialized) {
-          // First load: initialize with all calendars
-          setActiveCalendars(new Set(allIds));
-          setIsInitialized(true);
+      
+      if (!isInitialized) {
+        // First load: initialize from localStorage or default to all active
+        const saved = localStorage.getItem('activeCalendars');
+        if (saved) {
+          try {
+            const savedIds = JSON.parse(saved) as number[];
+            // Filter out IDs that no longer exist
+            const validSavedIds = savedIds.filter(id => allIds.includes(id));
+            setActiveCalendars(new Set(validSavedIds));
+          } catch (e) {
+            console.error('Failed to parse activeCalendars from localStorage', e);
+            setActiveCalendars(new Set(allIds));
+          }
         } else {
-          // Sub-sequent loads: ensure newly added calendars are also active
+          setActiveCalendars(new Set(allIds));
+        }
+        
+        // Mark all current calendars as seen
+        allIds.forEach(id => seenCalendarIds.current.add(id));
+        setIsInitialized(true);
+      } else {
+        // Sub-sequent loads: only auto-activate TRULY new calendars
+        const newCalendarIds = allIds.filter(id => !seenCalendarIds.current.has(id));
+        
+        if (newCalendarIds.length > 0) {
           setActiveCalendars(prev => {
             const newSet = new Set(prev);
-            let changed = false;
-            allIds.forEach(id => {
-              if (!newSet.has(id)) {
-                newSet.add(id);
-                changed = true;
-              }
+            newCalendarIds.forEach(id => {
+              newSet.add(id);
+              seenCalendarIds.current.add(id);
             });
-            return changed ? newSet : prev;
+            // Save updated state to localStorage
+            localStorage.setItem('activeCalendars', JSON.stringify(Array.from(newSet)));
+            return newSet;
           });
         }
       }

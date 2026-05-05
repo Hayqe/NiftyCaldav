@@ -30,6 +30,9 @@ class UserSettings(Base):
     default_view = Column(String, default="month")
     highlight_weekend = Column(Boolean, default=False)
     weekend_color = Column(String, default="#FEF9C3") # light yellow
+    default_duration = Column(Integer, default=60) # minutes
+    default_calendar_id = Column(Integer, ForeignKey("calendars.id", ondelete="SET NULL"), nullable=True)
+    show_week_numbers = Column(Boolean, default=False)
 
     # Relationships
     user = relationship("User", back_populates="user_settings")
