@@ -22,6 +22,10 @@ class CalendarInDB(CalendarBase):
     owner_id: int
     created_at: datetime
     updated_at: datetime
+    # Optional fields for shared calendars
+    system_username: Optional[str] = None
+    system_password: Optional[str] = None
+    is_shared_calendar: bool = False
 
     class Config:
         from_attributes = True
@@ -63,3 +67,24 @@ class CalendarRadicale(CalendarBase):
 
 class CalendarRadicaleWithShares(CalendarRadicale):
     shares: List[CalendarShareInDB] = []
+
+
+# Calendar with full sharing info
+class CalendarWithSharingInfo(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    color: Optional[str] = "blue"
+    owner_id: int
+    owner_username: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    # Sharing fields
+    system_username: Optional[str] = None
+    system_password: Optional[str] = None
+    is_owner: bool = False
+    permission: str = "read"
+    is_shared: bool = False
+
+    class Config:
+        from_attributes = True

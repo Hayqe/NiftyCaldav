@@ -1,5 +1,5 @@
 import axios, { AxiosInstance, AxiosError, InternalAxiosRequestConfig } from 'axios';
-import type { LoginCredentials, User, Calendar, Event, CalendarShare, UserSettings, ApiResponse, PaginatedResponse } from '@/types';
+import type { LoginCredentials, User, Calendar, Event, CalendarShare, UserSettings, ApiResponse, PaginatedResponse, CreateSharedCalendarResult } from '@/types';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
@@ -84,6 +84,9 @@ export const usersApi = {
   getAll: (page: number = 1, perPage: number = 20): Promise<PaginatedResponse<User>> =>
     api.get('/users/', { params: { page, per_page: perPage } }),
   
+  getAllSimple: (): Promise<ApiResponse<User[]>> =>
+    api.get('/users/all-simple'),
+  
   getById: (id: number): Promise<ApiResponse<User>> =>
     api.get(`/users/${id}`),
   
@@ -109,10 +112,22 @@ export const calendarsApi = {
     api.get('/calendars/'),
   
   getSharedCalendars: (): Promise<ApiResponse<Calendar[]>> =>
-    Promise.resolve({ data: [], message: 'Shared calendars' }),
+    api.get('/calendars/shared'),
+  
+  getMyAndSharedCalendars: (): Promise<ApiResponse<any[]>> =>
+    api.get('/calendars/my-and-shared'),
+  
+  checkWritePermission: (calendarId: number): Promise<ApiResponse<{ has_write_permission: boolean }>> =>
+    api.get(`/calendars/${calendarId}/check-write-permission`),
+  
+  checkReadPermission: (calendarId: number): Promise<ApiResponse<{ has_read_permission: boolean }>> =>
+    api.get(`/calendars/${calendarId}/check-read-permission`),
   
   create: (calendar: Omit<Calendar, 'id' | 'created_at' | 'updated_at'>): Promise<ApiResponse<Calendar>> =>
     api.post('/calendars/', calendar),
+  
+  createShared: (calendar: Omit<Calendar, 'id' | 'created_at' | 'updated_at' | 'generated_username' | 'generated_password' | 'radicale_url'>): Promise<ApiResponse<CreateSharedCalendarResult>> =>
+    api.post('/calendars/create-shared', calendar),
   
   update: (id: number, data: Partial<Omit<Calendar, 'id' | 'created_at' | 'updated_at'>>): Promise<ApiResponse<Calendar>> =>
     api.put(`/calendars/${id}`, data),

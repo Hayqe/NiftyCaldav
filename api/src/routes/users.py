@@ -12,6 +12,34 @@ from .dependencies import get_current_user, get_current_active_user, get_admin_u
 router = APIRouter(prefix="/users", tags=["users"])
 
 
+@router.get("/all-simple", response_model=List[UserInDB], summary="List all users simple")
+async def read_all_users_simple(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    List all users for sharing purposes. All authenticated users can access this.
+    """
+    return UserService.get_users(db, 0, 1000)
+
+
+@router.get("/", response_model=List[UserInDB], summary="List all users")
+async def read_users(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    List all users. Only accessible to admins or for sharing purposes.
+    """
+    if current_user.role != "admin":
+        # Non-admin users can only see themselves for sharing
+        return [current_user]
+    
+    return UserService.get_users(db, skip, limit)
+
+
 @router.post("/", response_model=UserInDB, summary="Create a new user")
 async def create_user(
     user: UserCreate,

@@ -24,6 +24,15 @@ async def create_event(
     Create a new event in the specified calendar via CalDAV.
     User must have write access to the calendar.
     """
+    # Check write permission
+    from ..services.calendars import CalendarService
+    has_write = CalendarService.has_write_permission(db, calendar_id, current_user.id)
+    if not has_write:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No write permission on this calendar"
+        )
+    
     created_event = EventService.create_event(db, event, current_user.id, calendar_id)
     if not created_event:
         raise HTTPException(
@@ -83,6 +92,15 @@ async def update_event(
     Update an existing event.
     User must have write access to the calendar.
     """
+    # Check write permission
+    from ..services.calendars import CalendarService
+    has_write = CalendarService.has_write_permission(db, calendar_id, current_user.id)
+    if not has_write:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No write permission on this calendar"
+        )
+    
     updated_event = EventService.update_event(db, event_id, event, current_user.id, calendar_id)
     if not updated_event:
         raise HTTPException(
@@ -103,6 +121,15 @@ async def delete_event(
     Delete an event.
     User must have write access to the calendar.
     """
+    # Check write permission
+    from ..services.calendars import CalendarService
+    has_write = CalendarService.has_write_permission(db, calendar_id, current_user.id)
+    if not has_write:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No write permission on this calendar"
+        )
+    
     success = EventService.delete_event(db, event_id, current_user.id, calendar_id)
     if not success:
         raise HTTPException(

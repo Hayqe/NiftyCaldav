@@ -196,3 +196,253 @@ class CalendarService:
         db.delete(db_share)
         db.commit()
         return True
+
+    @staticmethod
+    def has_write_permission(db: Session, calendar_id: int, user_id: int) -> bool:
+        """
+        Check if user has write permission on a calendar.
+        Returns True if:
+        - User is the owner of the calendar
+        - User has a share with 'write' or 'admin' permission on the calendar
+        """
+        # Check if user is owner
+        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
+        if calendar and calendar.owner_id == user_id:
+            return True
+        
+        # Check if user has write or admin permission via share
+        share = (
+            db.query(CalendarShare)
+            .filter(
+                CalendarShare.calendar_id == calendar_id,
+                CalendarShare.user_id == user_id
+            )
+            .first()
+        )
+        
+        if share and share.permission in ['write', 'admin']:
+            return True
+        
+        return False
+
+    @staticmethod
+    def has_read_permission(db: Session, calendar_id: int, user_id: int) -> bool:
+        """
+        Check if user has at least read permission on a calendar.
+        Returns True if:
+        - User is the owner of the calendar
+        - User has a share with 'read', 'write', or 'admin' permission on the calendar
+        """
+        # Check if user is owner
+        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
+        if calendar and calendar.owner_id == user_id:
+            return True
+        
+        # Check if user has any permission via share
+        share = (
+            db.query(CalendarShare)
+            .filter(
+                CalendarShare.calendar_id == calendar_id,
+                CalendarShare.user_id == user_id
+            )
+            .first()
+        )
+        
+        if share and share.permission in ['read', 'write', 'admin']:
+            return True
+        
+        return False
+
+    @staticmethod
+    def get_calendar_with_credentials(db: Session, calendar_id: int, user_id: int) -> Optional[dict]:
+        """
+        Get calendar info with credentials for shared calendars.
+        Returns calendar info including generated_username and generated_password if user has access.
+        """
+        from ..models import User as UserModel
+        
+        # Check if calendar exists
+        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
+        if not calendar:
+            return None
+        
+        # Check if user is owner
+        if calendar.owner_id == user_id:
+            # For owner, get the owner's user info
+            owner = db.query(UserModel).filter(UserModel.id == calendar.owner_id).first()
+            return {
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': owner.username if owner else None,
+                'generated_username': None,
+                'generated_password': None,
+                'is_owner': True,
+                'permission': 'admin'
+            }
+        
+        # Check if user has share access
+        share = (
+            db.query(CalendarShare)
+            .filter(
+                CalendarShare.calendar_id == calendar_id,
+                CalendarShare.user_id == user_id
+            )
+            .first()
+        )
+        
+        if share:
+            # Get the system user for this calendar (the owner of the calendar is the system user)
+            owner = db.query(UserModel).filter(UserModel.id == calendar.owner_id).first()
+            return {
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': owner.username if owner else None,
+                'generated_username': owner.username if owner else None,
+                'generated_password': 'admin',  # This should be stored in the calendar or user_settings
+                'is_owner': False,
+                'permission': share.permission
+            }
+        
+        return None
+
+    @staticmethod
+    def get_my_and_shared_calendars(db: Session, user_id: int) -> List[dict]:
+        """
+        Get all calendars that a user has access to (own + shared).
+        Returns calendar info with credentials for accessing via CalDAV.
+        """
+        from ..models import User as UserModel
+        
+        # Get user's own calendars
+        my_calendars = (
+            db.query(Calendar)
+            .filter(Calendar.owner_id == user_id)
+            .all()
+        )
+        
+        # Get shared calendars
+        shared_calendars = (
+            db.query(CalendarShare)
+            .filter(CalendarShare.user_id == user_id)
+            .all()
+        )
+        
+        result = []
+        
+        # Add own calendars
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        for calendar in my_calendars:
+            result.append({
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': user.username if user else None,
+                'generated_username': calendar.system_username,
+                'generated_password': calendar.system_password,
+                'is_owner': True,
+                'permission': 'admin',
+                'is_shared': calendar.is_shared_calendar,
+                'system_username': calendar.system_username,
+                'system_password': calendar.system_password
+            })
+        
+        # Add shared calendars with credentials
+        for share in shared_calendars:
+            calendar = share.calendar
+            owner = db.query(UserModel).filter(UserModel.id == calendar.owner_id).first()
+            result.append({
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': owner.username if owner else None,
+                'generated_username': calendar.system_username,
+                'generated_password': calendar.system_password,
+                'is_owner': False,
+                'permission': share.permission,
+                'is_shared': True,
+                'system_username': calendar.system_username,
+                'system_password': calendar.system_password
+            })
+        
+        return result
+
+    @staticmethod
+    def get_all_shared_calendars_for_user(db: Session, user_id: int) -> List[dict]:
+        """
+        Get all shared calendars for a user:
+        - Calendars owned by the user that are marked as shared
+        - Calendars shared with the user by others
+        """
+        from ..models import User as UserModel
+        
+        user = db.query(UserModel).filter(UserModel.id == user_id).first()
+        if not user:
+            return []
+        
+        result = []
+        
+        # Get calendars owned by this user that are shared
+        owned_shared = (
+            db.query(Calendar)
+            .filter(Calendar.owner_id == user_id, Calendar.is_shared_calendar == True)
+            .all()
+        )
+        
+        for calendar in owned_shared:
+            result.append({
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': user.username,
+                'created_at': calendar.created_at,
+                'updated_at': calendar.updated_at,
+                'generated_username': calendar.system_username,
+                'generated_password': calendar.system_password,
+                'is_owner': True,
+                'permission': 'admin',
+                'is_shared': True,
+                'system_username': calendar.system_username,
+                'system_password': calendar.system_password
+            })
+        
+        # Get calendars shared with this user
+        shared_with_me = (
+            db.query(CalendarShare)
+            .filter(CalendarShare.user_id == user_id)
+            .all()
+        )
+        
+        for share in shared_with_me:
+            calendar = share.calendar
+            owner = db.query(UserModel).filter(UserModel.id == calendar.owner_id).first()
+            result.append({
+                'id': calendar.id,
+                'name': calendar.name,
+                'description': calendar.description,
+                'color': calendar.color,
+                'owner_id': calendar.owner_id,
+                'owner_username': owner.username if owner else None,
+                'created_at': calendar.created_at,
+                'updated_at': calendar.updated_at,
+                'generated_username': calendar.system_username,
+                'generated_password': calendar.system_password,
+                'is_owner': False,
+                'permission': share.permission,
+                'is_shared': True,
+                'system_username': calendar.system_username,
+                'system_password': calendar.system_password
+            })
+        
+        return result

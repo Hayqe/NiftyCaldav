@@ -16,12 +16,42 @@ from src.models import User, UserSettings
 from src.services.auth import AuthService
 
 
+def run_migrations(engine):
+    """Run any pending database migrations."""
+    from sqlalchemy import text
+    
+    with engine.connect() as conn:
+        # Check if columns exist and add them if not
+        result = conn.execute(text("PRAGMA table_info(calendars)")).fetchall()
+        column_names = [col[1] for col in result]
+        
+        print(f"Checking calendars table columns: {column_names}")
+        
+        # Add missing columns
+        if 'system_username' not in column_names:
+            conn.execute(text("ALTER TABLE calendars ADD COLUMN system_username VARCHAR"))
+            print("✓ Added system_username column")
+        
+        if 'system_password' not in column_names:
+            conn.execute(text("ALTER TABLE calendars ADD COLUMN system_password VARCHAR"))
+            print("✓ Added system_password column")
+        
+        if 'is_shared_calendar' not in column_names:
+            conn.execute(text("ALTER TABLE calendars ADD COLUMN is_shared_calendar BOOLEAN DEFAULT 0"))
+            print("✓ Added is_shared_calendar column")
+        
+        conn.commit()
+
+
 def main():
     """Main seed function."""
     database_url = os.getenv("DATABASE_URL", "sqlite:////data/mistral.db")
     
     # Create engine
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
+    
+    # Run migrations first
+    run_migrations(engine)
     
     # Create all tables
     Base.metadata.create_all(bind=engine)

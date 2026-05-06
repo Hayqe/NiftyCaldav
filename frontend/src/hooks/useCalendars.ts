@@ -18,6 +18,32 @@ export function useSharedCalendars() {
   });
 }
 
+export function useMyAndSharedCalendars() {
+  return useQuery({
+    queryKey: ['calendars', 'my-and-shared'],
+    queryFn: calendarsApi.getMyAndSharedCalendars,
+    staleTime: 1000,
+  });
+}
+
+export function useCheckWritePermission(calendarId: number | null) {
+  return useQuery({
+    queryKey: ['calendars', calendarId, 'write-permission'],
+    queryFn: () => calendarsApi.checkWritePermission(calendarId!),
+    enabled: !!calendarId,
+    staleTime: 5000,
+  });
+}
+
+export function useCheckReadPermission(calendarId: number | null) {
+  return useQuery({
+    queryKey: ['calendars', calendarId, 'read-permission'],
+    queryFn: () => calendarsApi.checkReadPermission(calendarId!),
+    enabled: !!calendarId,
+    staleTime: 5000,
+  });
+}
+
 export function useAllCalendars() {
   return useQuery({
     queryKey: ['calendars', 'all'],
@@ -49,6 +75,17 @@ export function useCreateCalendar() {
   
   return useMutation({
     mutationFn: calendarsApi.create,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendars'] });
+    },
+  });
+}
+
+export function useCreateSharedCalendar() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: calendarsApi.createShared,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendars'] });
     },

@@ -6,26 +6,31 @@ from ..database import get_db
 from ..models import User, Calendar, CalendarShare
 from ..schemas.calendars import (
     CalendarCreate, CalendarUpdate, CalendarInDB, CalendarRadicale, 
-    CalendarShareCreate, CalendarShareInDB, CalendarWithShares, CalendarRadicaleWithShares
+    CalendarShareCreate, CalendarShareInDB, CalendarWithShares, CalendarRadicaleWithShares,
+    CalendarWithSharingInfo
 )
+from ..schemas.users import UserCreate
 from ..services.calendars import CalendarService
 from ..services.caldav_client import CalDAVClient
-from .dependencies import get_current_active_user, get_admin_user, get_current_user_from_token
+from ..services.users import UserService
+from .dependencies import get_current_active_user, get_admin_user
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
 
 
+# ==================== Root Endpoints ====================
+
 @router.post("/", response_model=CalendarRadicale, summary="Create a new calendar in Radicale")
 async def create_calendar(
     calendar: CalendarCreate,
-    token_payload: dict = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Create a new calendar directly in Radicale (no database).
     Returns calendar info from Radicale.
     """
     import hashlib
-    username = token_payload.get("username", "admin")
+    username = current_user.username
     try:
         result = CalendarService.create_calendar_radicale(calendar, username)
         
@@ -44,13 +49,15 @@ async def create_calendar(
 
 @router.get("/", response_model=List[CalendarRadicaleWithShares], summary="List all calendars from Radicale")
 async def read_calendars(
-    token_payload: dict = Depends(get_current_user_from_token)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     List all calendars for the current user directly from Radicale.
-    Admin users see all calendars on the server.
+    This only includes personal (non-shared) calendars.
+    Shared calendars are available via /calendars/shared.
     """
-    username = token_payload.get("username", "admin")
+    username = current_user.username
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -92,15 +99,107 @@ async def read_calendars(
     return result
 
 
+# ==================== Shared Calendar Endpoints (Static Paths) ====================
+
+# Shared Calendar Creation
+@router.post("/create-shared", summary="Create a new shared calendar with auto-generated user")
+async def create_shared_calendar(
+    calendar: CalendarCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Create a new calendar with a system-generated username/password.
+    The calendar is owned by the current user and can be shared with others.
+    Returns the calendar info with generated credentials.
+    """
+    import secrets
+    import string
+    from typing import Dict, Any
+    
+    # Generate random username and password for the new user
+    def generate_random_string(length: int = 12) -> str:
+        chars = string.ascii_lowercase + string.digits
+        return ''.join(secrets.choice(chars) for _ in range(length))
+    
+    username = f"shared_{generate_random_string(8)}"
+    password = generate_random_string(16)
+    
+    # Create user in database
+    user_data = UserCreate(username=username, password=password, role="user")
+    new_user = UserService.create_user(db, user_data)
+    
+    # Create calendar in Radicale with the new user
+    result = CalendarService.create_calendar_radicale(calendar, username)
+    
+    # Store calendar in database with system credentials
+    db_calendar = Calendar(
+        name=calendar.name,
+        description=calendar.description,
+        color=calendar.color or "blue",
+        owner_id=current_user.id,
+        system_username=username,
+        system_password=password,
+        is_shared_calendar=True
+    )
+    db.add(db_calendar)
+    db.commit()
+    db.refresh(db_calendar)
+    
+    # Return calendar with generated credentials (not using Pydantic model to include extra fields)
+    return {
+        "id": db_calendar.id,
+        "name": db_calendar.name,
+        "description": db_calendar.description,
+        "color": db_calendar.color,
+        "owner_id": db_calendar.owner_id,
+        "created_at": db_calendar.created_at.isoformat() if db_calendar.created_at else None,
+        "updated_at": db_calendar.updated_at.isoformat() if db_calendar.updated_at else None,
+        "generated_username": username,
+        "generated_password": password,
+        "radicale_url": result.get("url")
+    }
+
+
+# Get shared calendars for current user
+@router.get("/shared", response_model=List[CalendarWithSharingInfo], summary="Get all shared calendars (owned + shared with me)")
+async def read_shared_calendars(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get all shared calendars for the current user:
+    - Calendars owned by the user that are marked as shared
+    - Calendars shared with the user by others
+    """
+    return CalendarService.get_all_shared_calendars_for_user(db, current_user.id)
+
+
+# Get all calendars (own + shared) with credentials
+@router.get("/my-and-shared", summary="Get all calendars user has access to with credentials")
+async def read_my_and_shared_calendars(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get all calendars the user owns or has been shared with, including credentials for accessing shared calendars.
+    Returns calendar info with generated_username and generated_password for shared calendars.
+    """
+    calendars = CalendarService.get_my_and_shared_calendars(db, current_user.id)
+    return calendars
+
+
+# ==================== Single Calendar Endpoints (Dynamic Paths) ====================
+
 @router.get("/{calendar_id}", response_model=CalendarRadicaleWithShares, summary="Get calendar by ID (Radicale)")
 async def read_calendar(
     calendar_id: int,
-    token_payload: dict = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Get calendar by ID (hash from URL) directly from Radicale.
     """
-    username = token_payload.get("username", "admin")
+    username = current_user.username
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -143,13 +242,13 @@ async def read_calendar(
 async def update_calendar(
     calendar_id: int,
     calendar: CalendarUpdate,
-    token_payload: dict = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Update calendar directly in Radicale.
     Currently limited to description updates.
     """
-    username = token_payload.get("username", "admin")
+    username = current_user.username
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -185,12 +284,12 @@ async def update_calendar(
 @router.delete("/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete calendar (Radicale)")
 async def delete_calendar(
     calendar_id: int,
-    token_payload: dict = Depends(get_current_user_from_token)
+    current_user: User = Depends(get_current_active_user)
 ):
     """
     Delete calendar directly from Radicale.
     """
-    username = token_payload.get("username", "admin")
+    username = current_user.username
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -229,6 +328,40 @@ async def delete_calendar(
         detail="Calendar not found"
     )
 
+
+# ==================== Calendar Permission Endpoints ====================
+
+# Check write permission for a calendar
+@router.get("/{calendar_id}/check-write-permission", summary="Check if user has write permission on calendar")
+async def check_write_permission(
+    calendar_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Check if the current user has write permission on the specified calendar.
+    Returns True if user can write to the calendar.
+    """
+    has_permission = CalendarService.has_write_permission(db, calendar_id, current_user.id)
+    return {"has_write_permission": has_permission}
+
+
+# Check read permission for a calendar
+@router.get("/{calendar_id}/check-read-permission", summary="Check if user has read permission on calendar")
+async def check_read_permission(
+    calendar_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Check if the current user has at least read permission on the specified calendar.
+    Returns True if user can read from the calendar.
+    """
+    has_permission = CalendarService.has_read_permission(db, calendar_id, current_user.id)
+    return {"has_read_permission": has_permission}
+
+
+# ==================== Calendar Share Endpoints ====================
 
 # Calendar Shares
 @router.post("/{calendar_id}/shares", response_model=CalendarShareInDB, summary="Share calendar with user")

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, TEXT, TIMESTAMP, func, ForeignKey, PrimaryKeyConstraint
+from sqlalchemy import Column, Integer, String, TEXT, TIMESTAMP, func, ForeignKey, PrimaryKeyConstraint, Boolean
 from sqlalchemy.orm import relationship
 from ..database import Base
 
@@ -11,6 +11,10 @@ class Calendar(Base):
     description = Column(TEXT)
     color = Column(String, default="blue")  # Store calendar color (e.g., "blue", "red", "green")
     owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    # For shared calendars: store the system user credentials
+    system_username = Column(String, nullable=True)  # Generated username for shared calendar
+    system_password = Column(String, nullable=True)  # Generated password for shared calendar
+    is_shared_calendar = Column(Boolean, default=False)  # Flag to identify shared calendars
     created_at = Column(TIMESTAMP, server_default=func.now())
     updated_at = Column(TIMESTAMP, server_default=func.now(), onupdate=func.now())
 

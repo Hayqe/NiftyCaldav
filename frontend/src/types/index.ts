@@ -28,6 +28,15 @@ export interface Calendar {
   color?: string;
   created_at: string;
   updated_at: string;
+  generated_username?: string;
+  generated_password?: string;
+  radicale_url?: string;
+  system_username?: string;
+  system_password?: string;
+  is_shared_calendar?: boolean;
+  is_owner?: boolean;
+  permission?: 'read' | 'write' | 'admin';
+  is_shared?: boolean;
 }
 
 export interface CalendarShare {
@@ -37,6 +46,21 @@ export interface CalendarShare {
   created_at: string;
   calendar?: Calendar;
   user?: User;
+}
+
+export interface CalendarWithShares extends Calendar {
+  shares?: CalendarShare[];
+}
+
+export interface CreateSharedCalendarResult extends Calendar {
+  generated_username: string;
+  generated_password: string;
+  radicale_url: string;
+}
+
+export interface CalendarWithPermission extends Calendar {
+  has_write_permission?: boolean;
+  has_read_permission?: boolean;
 }
 
 // Event Types

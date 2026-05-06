@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { ChevronLeft, ChevronRight, Plus, Users, Settings, LogOut, X, Eye, EyeOff } from 'lucide-react';
-import { useAuth, useCreateCalendar } from '@/hooks';
+import { useAuth, useCreateCalendar, useCreateSharedCalendar } from '@/hooks';
 import { useCalendarContext } from '@/context/CalendarContext';
 import { cn, CALENDAR_COLORS } from '@/utils';
 import type { Calendar } from '@/types';
 import Logo from './Logo';
 import LoadingSpinner from './LoadingSpinner';
 import SettingsModal from './SettingsModal';
+import CreateSharedCalendarModal from './CreateSharedCalendarModal';
 
 interface SidebarProps {
   isCollapsed: boolean;
@@ -15,12 +16,16 @@ interface SidebarProps {
 
 export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
   const [isCreatingCalendar, setIsCreatingCalendar] = useState(false);
+  const [isCreatingSharedCalendar, setIsCreatingSharedCalendar] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
   const [newCalendarColor, setNewCalendarColor] = useState('blue');
+  const [newSharedCalendarName, setNewSharedCalendarName] = useState('');
+  const [newSharedCalendarColor, setNewSharedCalendarColor] = useState('purple');
   
   const { logout } = useAuth();
   const { mutateAsync: createCalendar, isPending: isCreating } = useCreateCalendar();
+  const { mutateAsync: createSharedCalendar, isPending: isCreatingShared } = useCreateSharedCalendar();
   const {
     myCalendars,
     sharedCalendars,
@@ -43,6 +48,24 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
       setNewCalendarColor('blue');
     } catch (error) {
       console.error('Failed to create calendar:', error);
+    }
+  };
+
+  const handleCreateSharedCalendar = async () => {
+    if (!newSharedCalendarName.trim()) return null;
+    
+    try {
+      const result = await createSharedCalendar({
+        name: newSharedCalendarName,
+        color: newSharedCalendarColor,
+        description: ''
+      });
+      // Don't close the modal here - the modal will handle showing credentials
+      // The modal will close when user clicks "Sluiten"
+      return result;
+    } catch (error) {
+      console.error('Failed to create shared calendar:', error);
+      return null;
     }
   };
 
@@ -155,7 +178,15 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
           </div>
 
           <div className="p-4 border-t border-gray-800">
-            <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3 px-2">Gedeeld</h2>
+            <div className="flex items-center justify-between mb-3 px-2">
+              <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Gedeeld</h2>
+              <button
+                onClick={() => setIsCreatingSharedCalendar(true)}
+                className="p-1 rounded-lg hover:bg-white/10 transition-colors"
+              >
+                <Plus className="w-4 h-4 text-gray-300" />
+              </button>
+            </div>
             <div className="space-y-1">
               {sharedCalendars.map((calendar: Calendar) => {
                 let colorHex = calendar.color;
@@ -232,6 +263,17 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
       )}
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      
+      <CreateSharedCalendarModal
+        isOpen={isCreatingSharedCalendar}
+        onClose={() => setIsCreatingSharedCalendar(false)}
+        onCreate={handleCreateSharedCalendar}
+        name={newSharedCalendarName}
+        setName={setNewSharedCalendarName}
+        color={newSharedCalendarColor}
+        setColor={setNewSharedCalendarColor}
+        isCreating={isCreatingShared}
+      />
     </>
   );
 }

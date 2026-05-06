@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { format, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, parseISO, addMinutes, getWeek } from 'date-fns';
 import { nl } from 'date-fns/locale';
-import { MapPin, Plus } from 'lucide-react';
+import { MapPin, Plus, Edit2, Eye } from 'lucide-react';
 import { useCalendarContext } from '@/context/CalendarContext';
-import { useEvents, useCreateEvent, useUpdateEvent, useSettings } from '@/hooks';
-import type { Event } from '@/types';
+import { useEvents, useCreateEvent, useUpdateEvent, useSettings, useCheckWritePermission } from '@/hooks';
+import type { Event, Calendar } from '@/types';
 import { CALENDAR_COLORS, WEEKDAYS } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
 
@@ -204,8 +204,36 @@ export default function HomePage() {
     }
   };
 
+  // Check if user has write permission on a calendar
+  const hasWritePermission = (calendarId: number): boolean => {
+    // Check if it's the user's own calendar
+    const isOwner = myCalendars.some(c => c.id === calendarId);
+    if (isOwner) return true;
+    
+    // Check shared calendars with write/admin permission
+    const sharedCal = sharedCalendars.find(c => c.id === calendarId);
+    return sharedCal?.permission === 'write' || sharedCal?.permission === 'admin';
+  };
+
   // Handle clicking on an existing event to edit
   const handleEditEvent = (event: Event) => {
+    const canEdit = hasWritePermission(event.calendar_id);
+    if (!canEdit) {
+      // Show read-only view instead of edit modal
+      setEditingEvent(event);
+      setSelectedEventCalendarId(event.calendar_id);
+      setEventFormData({
+        title: event.title || '',
+        description: event.description || '',
+        start: event.start || '',
+        end: event.end || '',
+        all_day: event.all_day || false,
+        location: event.location || '',
+      });
+      setIsEventModalOpen(true);
+      return;
+    }
+    
     setEditingEvent(event);
     setSelectedEventCalendarId(event.calendar_id);
     setEventFormData({
@@ -927,7 +955,10 @@ export default function HomePage() {
       {isEventModalOpen && (editingEvent || (selectedEventDate && selectedEventCalendarId)) && (
         <div
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setIsEventModalOpen(false)}
+          onClick={() => {
+            setIsEventModalOpen(false);
+            setEditingEvent(null);
+          }}
         >
           <div
             className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
@@ -935,7 +966,11 @@ export default function HomePage() {
           >
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold text-gray-900">
-                {editingEvent ? 'Event bewerken' : 'Nieuw event'}
+                {editingEvent ? (
+                  hasWritePermission(editingEvent.calendar_id) ? 
+                    'Event bewerken' : 
+                    'Event bekijken'
+                ) : 'Nieuw event'}
               </h3>
               <button
                 onClick={() => {
@@ -949,6 +984,13 @@ export default function HomePage() {
             </div>
             
             <div className="space-y-4">
+              {editingEvent && !hasWritePermission(editingEvent.calendar_id) && (
+                <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-2 rounded-lg text-sm">
+                  <Eye className="w-4 h-4 inline mr-1" />
+                  Dit is een read-only event. Je kunt deze alleen bekijken.
+                </div>
+              )}
+              
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Titel *
@@ -959,6 +1001,7 @@ export default function HomePage() {
                   onChange={(e) => setEventFormData({ ...eventFormData, title: e.target.value })}
                   className="input"
                   placeholder="Event titel"
+                  disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                 />
               </div>
               
@@ -970,12 +1013,20 @@ export default function HomePage() {
                   value={selectedEventCalendarId || ''}
                   onChange={(e) => setSelectedEventCalendarId(Number(e.target.value))}
                   className="input"
+                  disabled={isLoadingCalendars || (editingEvent && !hasWritePermission(editingEvent.calendar_id))}
                 >
                   {myCalendars.map(calendar => (
                     <option key={calendar.id} value={calendar.id}>
                       {calendar.name}
                     </option>
                   ))}
+                  {sharedCalendars
+                    .filter(cal => cal.permission === 'write' || cal.permission === 'admin')
+                    .map(calendar => (
+                      <option key={calendar.id} value={calendar.id}>
+                        {calendar.name} (gedeeld)
+                      </option>
+                    ))}
                 </select>
               </div>
               
@@ -995,6 +1046,7 @@ export default function HomePage() {
                       });
                     }}
                     className={cn("input", eventFormData.all_day ? "bg-gray-50 text-gray-500" : "")}
+                    disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                   />
                 </div>
                 <div>
@@ -1012,6 +1064,7 @@ export default function HomePage() {
                       });
                     }}
                     className={cn("input", eventFormData.all_day ? "bg-gray-50 text-gray-500" : "")}
+                    disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                   />
                 </div>
               </div>
@@ -1023,6 +1076,7 @@ export default function HomePage() {
                     checked={eventFormData.all_day}
                     onChange={(e) => setEventFormData({ ...eventFormData, all_day: e.target.checked })}
                     className="w-4 h-4 text-primary-600 rounded focus:ring-primary-500"
+                    disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                   />
                   <span className="text-sm font-medium text-gray-700">Hele dag</span>
                 </label>
@@ -1037,6 +1091,7 @@ export default function HomePage() {
                   value={eventFormData.location}
                   onChange={(e) => setEventFormData({ ...eventFormData, location: e.target.value })}
                   className="input"
+                  disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                   placeholder="Locatie"
                 />
               </div>
@@ -1050,23 +1105,29 @@ export default function HomePage() {
                   onChange={(e) => setEventFormData({ ...eventFormData, description: e.target.value })}
                   className="input min-h-[100px] resize-none"
                   placeholder="Event beschrijving"
+                  disabled={editingEvent && !hasWritePermission(editingEvent.calendar_id)}
                 />
               </div>
               
               <div className="flex gap-2 justify-end">
                 <button
-                  onClick={() => setIsEventModalOpen(false)}
+                  onClick={() => {
+                    setIsEventModalOpen(false);
+                    setEditingEvent(null);
+                  }}
                   className="btn btn-secondary"
                 >
-                  Annuleren
+                  Sluiten
                 </button>
-                <button
-                  onClick={handleSaveEvent}
-                  disabled={!eventFormData?.title?.trim()}
-                  className="btn btn-primary"
-                >
-                  Opslaan
-                </button>
+                {!(editingEvent && !hasWritePermission(editingEvent.calendar_id)) && (
+                  <button
+                    onClick={handleSaveEvent}
+                    disabled={!eventFormData?.title?.trim()}
+                    className="btn btn-primary"
+                  >
+                    Opslaan
+                  </button>
+                )}
               </div>
             </div>
           </div>
