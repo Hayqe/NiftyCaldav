@@ -19,10 +19,16 @@ def get_current_user(
     """
     Get the current authenticated user from JWT token.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
     token = credentials.credentials
+    logger.info(f"Validating token for request: {request.url}")
+    
     payload = AuthService.verify_token(token)
     
     if not payload:
+        logger.warning(f"Invalid or expired token for request: {request.url}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
@@ -31,6 +37,7 @@ def get_current_user(
     
     user_id = payload.get("sub")
     if not user_id:
+        logger.warning(f"Invalid token payload (no sub): {request.url}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
@@ -39,12 +46,14 @@ def get_current_user(
     
     user = UserService.get_user(db, int(user_id))
     if not user:
+        logger.warning(f"User not found for id: {user_id}, request: {request.url}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
+    logger.info(f"User authenticated: {user.username}, role: {user.role}, must_change_pw: {user.must_change_password}")
     return user
 
 

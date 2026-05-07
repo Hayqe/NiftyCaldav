@@ -46,7 +46,7 @@ export default api;
 
 // ==================== AUTH ====================
 export const authApi = {
-  login: (credentials: LoginCredentials): Promise<ApiResponse<{ access_token: string; token_type: string }>> => {
+  login: (credentials: LoginCredentials): Promise<ApiResponse<{ access_token: string; token_type: string; must_change_password: boolean }>> => {
     return api.post('/auth/login', {}, {
       auth: {
         username: credentials.username,
@@ -74,12 +74,21 @@ export const authApi = {
     return Promise.reject(new Error('Not authenticated'));
   },
 
-  changePassword: (_data: { current_password: string; new_password: string }): Promise<ApiResponse<null>> => {
-    return Promise.reject(new Error('Not implemented'));
+  changePassword: (data: { current_password?: string; new_password: string }): Promise<ApiResponse<{ message: string; must_change_password: boolean }>> => {
+    return api.post('/users/me/change-password', data);
   },
 };
 
 // ==================== USERS ====================
+export interface UserWithOTP extends User {
+  one_time_password?: string;
+}
+
+export interface PasswordChangeResponse {
+  message: string;
+  must_change_password: boolean;
+}
+
 export const usersApi = {
   getAll: (page: number = 1, perPage: number = 20): Promise<PaginatedResponse<User>> =>
     api.get('/users/', { params: { page, per_page: perPage } }),
@@ -93,11 +102,20 @@ export const usersApi = {
   create: (user: Omit<User, 'id' | 'created_at' | 'updated_at'> & { password: string }): Promise<ApiResponse<User>> =>
     api.post('/users/', user),
   
+  createWithOTP: (username: string, role: string = 'user'): Promise<ApiResponse<UserWithOTP>> =>
+    api.post('/users/create-with-otp', null, { params: { username, role } }),
+  
   update: (id: number, user: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>>): Promise<ApiResponse<User>> =>
     api.put(`/users/${id}`, user),
   
   delete: (id: number): Promise<ApiResponse<null>> =>
     api.delete(`/users/${id}`),
+  
+  resetPassword: (userId: number): Promise<ApiResponse<UserWithOTP>> =>
+    api.post(`/users/${userId}/reset-password`),
+  
+  changeUserPassword: (userId: number, data: { new_password: string }): Promise<ApiResponse<PasswordChangeResponse>> =>
+    api.post(`/users/${userId}/change-password`, data),
 };
 
 // ==================== CALENDARS ====================

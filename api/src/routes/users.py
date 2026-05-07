@@ -1,10 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Annotated
+from typing import List, Annotated, Optional
 
 from ..database import get_db
 from ..models import User
-from ..schemas.users import UserCreate, UserUpdate, UserInDB, UserSettingsInDB, UserSettingsUpdate
+from ..schemas.users import (
+    UserCreate, UserUpdate, UserInDB, UserSettingsInDB, UserSettingsUpdate,
+    UserCreateResponse, PasswordChange, PasswordChangeResponse
+)
 from ..services.users import UserService
 from ..services.auth import AuthService
 from .dependencies import get_current_user, get_current_active_user, get_admin_user
@@ -197,3 +200,135 @@ async def update_user_settings(
             detail="User settings not found"
         )
     return updated_settings
+
+
+# Admin-only endpoints for user management with one-time passwords
+
+@router.post("/create-with-otp", response_model=UserCreateResponse, summary="Create user with one-time password")
+async def create_user_with_otp(
+    username: str,
+    role: Optional[str] = "user",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Create a new user with a one-time password (three Dutch words).
+    The user will be forced to change their password on first login.
+    Admin only.
+    """
+    existing_user = UserService.get_user_by_username(db, username)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already exists"
+        )
+    
+    db_user, one_time_password = UserService.create_user_with_otp(db, username, role)
+    
+    # Return user info with the one-time password
+    return UserCreateResponse(
+        id=db_user.id,
+        username=db_user.username,
+        role=db_user.role,
+        must_change_password=db_user.must_change_password,
+        created_at=db_user.created_at,
+        updated_at=db_user.updated_at,
+        one_time_password=one_time_password
+    )
+
+
+@router.post("/{user_id}/reset-password", response_model=UserCreateResponse, summary="Reset user password")
+async def reset_user_password(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Reset a user's password to a new one-time password.
+    The user will be forced to change their password on next login.
+    Admin only.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    db_user, one_time_password = UserService.reset_user_password(db, user_id)
+    
+    if not db_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    logger.info(f"Password reset for user {user_id}: OTP = {one_time_password}")
+    
+    return UserCreateResponse(
+        id=db_user.id,
+        username=db_user.username,
+        role=db_user.role,
+        must_change_password=db_user.must_change_password,
+        created_at=db_user.created_at,
+        updated_at=db_user.updated_at,
+        one_time_password=one_time_password
+    )
+
+
+@router.post("/me/change-password", response_model=PasswordChangeResponse, summary="Change own password")
+async def change_own_password(
+    password_data: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Change the current user's password.
+    If must_change_password is True, current_password is not required.
+    """
+    # If user must change password, they don't need to provide current password
+    verify_current = password_data.current_password if not current_user.must_change_password else None
+    
+    updated_user = UserService.change_password(
+        db, 
+        current_user.id, 
+        password_data.new_password, 
+        verify_current
+    )
+    
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid current password"
+        )
+    
+    return PasswordChangeResponse(
+        message="Password changed successfully",
+        must_change_password=updated_user.must_change_password
+    )
+
+
+@router.post("/{user_id}/change-password", response_model=PasswordChangeResponse, summary="Change another user's password (admin)")
+async def change_user_password(
+    user_id: int,
+    password_data: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_admin_user)
+):
+    """
+    Change another user's password.
+    Admin only. Current password verification is not required for admins.
+    """
+    updated_user = UserService.change_password(
+        db,
+        user_id,
+        password_data.new_password,
+        None  # Admins don't need to verify current password
+    )
+    
+    if not updated_user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+    
+    return PasswordChangeResponse(
+        message="Password changed successfully",
+        must_change_password=updated_user.must_change_password
+    )

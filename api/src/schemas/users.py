@@ -21,11 +21,32 @@ class UserUpdate(BaseModel):
 class UserInDB(UserBase):
     id: int
     role: str
+    must_change_password: bool
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class UserCreateResponse(UserInDB):
+    """Response with one-time password for new users"""
+    one_time_password: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class PasswordChange(BaseModel):
+    """Schema for password change"""
+    current_password: Optional[str] = None  # Required if user has a password
+    new_password: str = Field(..., min_length=6)
+
+
+class PasswordChangeResponse(BaseModel):
+    """Response after password change"""
+    message: str
+    must_change_password: bool
 
 
 class UserSettingsBase(BaseModel):

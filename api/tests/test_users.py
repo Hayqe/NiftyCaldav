@@ -3,6 +3,106 @@ import pytest
 from fastapi import status
 
 
+class TestUserOTPManagement:
+    """Test one-time password and user management endpoints."""
+
+    def test_create_user_with_otp(self, client, admin_token):
+        """Test creating a user with one-time password."""
+        response = client.post(
+            "/users/create-with-otp?username=new_otp_user&role=user",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["username"] == "new_otp_user"
+        assert data["must_change_password"] == True
+        assert "one_time_password" in data
+        assert "-" in data["one_time_password"]  # Three words with hyphens
+        assert len(data["one_time_password"].split("-")) == 3
+
+    def test_create_user_with_otp_duplicate(self, client, admin_token):
+        """Test creating duplicate user with OTP."""
+        # First create
+        client.post(
+            "/users/create-with-otp?username=dup_otp_user&role=user",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        
+        # Try again
+        response = client.post(
+            "/users/create-with-otp?username=dup_otp_user&role=user",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+        assert "already exists" in response.json()["detail"]
+
+    def test_reset_user_password(self, client, admin_token):
+        """Test resetting a user's password to a new OTP."""
+        # First create a user
+        create_response = client.post(
+            "/users/",
+            json={
+                "username": "reset_test_user",
+                "password": "oldpassword123",
+                "role": "user"
+            },
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        user_id = create_response.json()["id"]
+        
+        # Reset password
+        response = client.post(
+            f"/users/{user_id}/reset-password",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        
+        assert response.status_code == status.HTTP_200_OK
+        data = response.json()
+        assert data["must_change_password"] == True
+        assert "one_time_password" in data
+        assert len(data["one_time_password"].split("-")) == 3
+
+    def test_reset_nonexistent_user_password(self, client, admin_token):
+        """Test resetting password for nonexistent user."""
+        response = client.post(
+            "/users/9999/reset-password",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        
+        assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    def test_change_own_password_with_flag(self, client, admin_token):
+        """Test changing password when must_change_password is True."""
+        # First create a user with OTP
+        create_response = client.post(
+            "/users/create-with-otp?username=change_pw_user&role=user",
+            headers={"Authorization": f"Bearer {admin_token}"}
+        )
+        otp = create_response.json()["one_time_password"]
+        user_id = create_response.json()["id"]
+        
+        # Login as this user to get token
+        import base64
+        credentials = base64.b64encode(f"change_pw_user:{otp}".encode()).decode()
+        login_response = client.post(
+            "/auth/login",
+            headers={"Authorization": f"Basic {credentials}"}
+        )
+        user_token = login_response.json()["access_token"]
+        
+        # Change password without providing current password (flag is set)
+        response = client.post(
+            "/users/me/change-password",
+            json={"new_password": "new_secure_password123"},
+            headers={"Authorization": f"Bearer {user_token}"}
+        )
+        
+        assert response.status_code == status.HTTP_200_OK
+        assert response.json()["must_change_password"] == False
+
+
 class TestUsers:
     """Test user management endpoints."""
 

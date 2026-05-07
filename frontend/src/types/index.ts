@@ -3,6 +3,7 @@ export interface User {
   id: number;
   username: string;
   role: 'admin' | 'user';
+  must_change_password?: boolean;
   created_at: string;
   updated_at: string;
 }
