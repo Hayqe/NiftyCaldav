@@ -8,7 +8,7 @@ import { CALENDAR_COLORS, TIMEZONES, LANGUAGES } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import type { User as UserType, UserSettings, ApiResponse } from '@/types';
 
-type TabType = 'profile' | 'notifications' | 'appearance' | 'general' | 'users';
+type TabType = 'profile' | 'notifications' | 'appearance' | 'users';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
@@ -79,13 +79,6 @@ function SettingsSidebar({ activeTab, setActiveTab, user }: SettingsSidebarProps
             <Palette className="w-5 h-5" />
             <span>Uiterlijk</span>
           </button>
-          <button
-            onClick={() => setActiveTab('general')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'general' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-          >
-            <Settings className="w-5 h-5" />
-            <span>Algemeen</span>
-          </button>
           {user?.role === 'admin' && (
             <button
               onClick={() => setActiveTab('users')}
@@ -148,13 +141,6 @@ function SettingsContent({ activeTab, user }: SettingsContentProps) {
       )}
       {activeTab === 'appearance' && (
         <AppearanceTab
-          settings={settings}
-          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
-          isUpdatingSettings={false}
-        />
-      )}
-      {activeTab === 'general' && (
-        <GeneralTab
           settings={settings}
           updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
           isUpdatingSettings={false}
@@ -570,10 +556,9 @@ function ProfileTab({ user, changePassword }: ProfileTabProps) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6">Wijzig wachtwoord</h2>
+      <h2 className="text-lg font-semibold text-gray-900 mb-6">Profiel</h2>
       
       <div className="bg-gray-50 rounded-lg p-4 mb-6">
-        <h3 className="font-medium text-gray-900 mb-2">Huidige gebruiker</h3>
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
             <span className="text-primary-700 font-semibold text-xl">{user?.username?.charAt(0).toUpperCase()}</span>
@@ -695,56 +680,43 @@ function NotificationsTab({ settings, updateSettings }: NotificationsTabProps) {
 }
 
 // Appearance Tab Component
-function AppearanceTab({ settings }: NotificationsTabProps) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6">Uiterlijk</h2>
-      
-      <div className="space-y-6 max-w-md">
-        <div>
-          <h3 className="font-medium text-gray-900 mb-2">Agenda kleuren</h3>
-          <p className="text-sm text-gray-500 mb-4">Stel standaard kleuren in voor nieuwe agenda's</p>
-          <div className="flex gap-2 flex-wrap">
-            {CALENDAR_COLORS.map(color => (
-              <button
-                key={color.value}
-                className={`w-8 h-8 rounded-full transition-all ${settings?.calendar_colors === color.value ? 'ring-2 ring-primary-500' : ''}`}
-                style={{ backgroundColor: color.hex }}
-              />
-            ))}
-          </div>
-        </div>
-
-        <div className="pt-4">
-          <button className="btn btn-primary">
-            Opslaan
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// General Tab Component
-function GeneralTab({ settings, updateSettings }: NotificationsTabProps) {
+function AppearanceTab({ settings, updateSettings }: NotificationsTabProps) {
   const [formData, setFormData] = useState({
+    highlight_weekend: settings?.highlight_weekend || false,
     timezone: settings?.timezone || 'Europe/Amsterdam',
-    language: settings?.language || 'nl',
+    default_duration: settings?.default_duration || 60,
+    default_view: settings?.default_view || 'month',
   });
 
   const handleSave = async () => {
     try {
       await updateSettings(formData);
     } catch (err) {
-      // Error
+      // Error handling
     }
   };
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6">Algemeen</h2>
-
+      <h2 className="text-lg font-semibold text-gray-900 mb-6">Uiterlijk</h2>
+      
       <div className="space-y-6 max-w-md">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="font-medium text-gray-900">Weekend gekleurd</h3>
+            <p className="text-sm text-gray-500">Toon zaterdag/zondag met achtergrondkleur</p>
+          </div>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={formData.highlight_weekend}
+              onChange={(e) => setFormData({ ...formData, highlight_weekend: e.target.checked })}
+              className="sr-only peer"
+            />
+            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
+          </label>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Tijdzone
@@ -764,18 +736,34 @@ function GeneralTab({ settings, updateSettings }: NotificationsTabProps) {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
-            Taal
+            Standaard duur afspraken
           </label>
           <select
-            value={formData.language}
-            onChange={(e) => setFormData({ ...formData, language: e.target.value })}
+            value={formData.default_duration}
+            onChange={(e) => setFormData({ ...formData, default_duration: Number(e.target.value) })}
             className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            {LANGUAGES.map(option => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
+            <option value={15}>15 minuten</option>
+            <option value={30}>30 minuten</option>
+            <option value={45}>45 minuten</option>
+            <option value={60}>60 minuten</option>
+            <option value={90}>90 minuten</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Standaardweergave
+          </label>
+          <select
+            value={formData.default_view}
+            onChange={(e) => setFormData({ ...formData, default_view: e.target.value })}
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+          >
+            <option value="day">Dag</option>
+            <option value="week">Week</option>
+            <option value="month">Maand</option>
+            <option value="list">Lijst</option>
           </select>
         </div>
 
@@ -791,3 +779,5 @@ function GeneralTab({ settings, updateSettings }: NotificationsTabProps) {
     </div>
   );
 }
+
+
