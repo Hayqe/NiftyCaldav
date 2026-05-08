@@ -1,38 +1,12 @@
 import os
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 import jwt
-import bcrypt
 
 # JWT Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
-
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verify a password against its bcrypt hash."""
-    try:
-        # Remove the $2b$ prefix if present (passlib format)
-        if hashed_password.startswith('$2b$'):
-            # This is already a bcrypt hash
-            return bcrypt.checkpw(
-                plain_password.encode('utf-8'),
-                hashed_password.encode('utf-8')
-            )
-        return bcrypt.checkpw(
-            plain_password.encode('utf-8'),
-            hashed_password.encode('utf-8')
-        )
-    except Exception:
-        return False
-
-
-def get_password_hash(password: str) -> str:
-    """Generate a bcrypt hashed password."""
-    salt = bcrypt.gensalt()
-    hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
-    return hashed.decode('utf-8')
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -59,18 +33,15 @@ def decode_access_token(token: str) -> dict:
 
 class AuthService:
     @staticmethod
-    def hash_password(password: str) -> str:
-        return get_password_hash(password)
-
-    @staticmethod
-    def verify_password(plain: str, hashed: str) -> bool:
-        return verify_password(plain, hashed)
-
-    @staticmethod
-    def create_token(user_id: int, username: str, role: str) -> str:
+    def create_token(username: str, role: str) -> str:
+        """
+        Create JWT token for authenticated user.
+        
+        Note: Token now contains username (string) instead of user_id (int).
+        The sub field is removed since we use username directly.
+        """
         expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         token_data = {
-            "sub": str(user_id),
             "username": username,
             "role": role
         }
@@ -78,4 +49,46 @@ class AuthService:
 
     @staticmethod
     def verify_token(token: str) -> dict:
+        """Verify JWT token and return payload."""
         return decode_access_token(token)
+    
+    @staticmethod
+    def authenticate_with_radicale(username: str, password: str) -> Tuple[bool, str]:
+        """
+        Authenticate user credentials directly against Radicale.
+        
+        Returns:
+            Tuple of (success: bool, role: str)
+            role defaults to "user" if not determinable from Radicale
+        """
+        from .caldav_client import CalDAVClient
+        
+        client = CalDAVClient()
+        if client.connect(username, password):
+            # For now, we determine role based on username
+            # In production, you might have a way to get role from Radicale
+            # or maintain a separate role mapping
+            # Default to "user", admin is determined by username
+            if username == "admin":
+                return True, "admin"
+            return True, "user"
+        
+        return False, ""
+    
+    @staticmethod
+    def get_user_info_from_token(token: str) -> dict:
+        """
+        Extract user info from JWT token without DB lookup.
+        
+        Returns dict with:
+            - username: str
+            - role: str
+        """
+        payload = AuthService.verify_token(token)
+        if not payload:
+            return None
+        
+        return {
+            "username": payload.get("username"),
+            "role": payload.get("role", "user")
+        }

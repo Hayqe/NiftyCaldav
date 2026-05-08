@@ -5,7 +5,6 @@ import { CalendarProvider } from '@/context/CalendarContext';
 import Layout from '@/components/Layout';
 import LoginPage from '@/pages/LoginPage';
 import HomePage from '@/pages/HomePage';
-import AdminPage from '@/pages/AdminPage';
 import SettingsPage from '@/pages/SettingsPage';
 import ICSImportPage from '@/pages/ICSImportPage';
 import LoadingSpinner from '@/components/LoadingSpinner';
@@ -25,29 +24,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  return <>{children}</>;
-}
-
-function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { user, isAuthenticated, isLoading } = useAuth();
-  const location = useLocation();
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <LoadingSpinner size="lg" />
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  if (user?.role !== 'admin') {
-    return <Navigate to="/" replace />;
   }
 
   return <>{children}</>;
@@ -94,15 +70,6 @@ function App() {
           <Route index element={<HomePage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="ics-import" element={<ICSImportPage />} />
-          
-          <Route
-            path="admin"
-            element={
-              <AdminRoute>
-                <AdminPage />
-              </AdminRoute>
-            }
-          />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

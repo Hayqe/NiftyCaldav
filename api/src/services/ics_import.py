@@ -69,22 +69,23 @@ class ICSImportService:
     def import_ics_to_calendar(
         db: Any,
         ics_content: str,
-        user_id: int,
+        username: str,
         calendar_id: int
     ) -> Tuple[bool, str, int, List[str]]:
         """
         Import ICS file content and save events to CalDAV efficiently.
         Optimized by reusing connection and avoiding repeated lookups.
+        
+        Note: Now uses username (string) instead of user_id (int).
         """
         from ..services.events import EventService
-        from ..services.users import UserService
         from ..services.caldav_client import CalDAVClient
         
         start_time = time.time()
         errors = []
         imported_count = 0
         
-        print(f"[IMPORT] Starting optimized import for user {user_id}", flush=True)
+        print(f"[IMPORT] Starting optimized import for user {username}", flush=True)
         
         try:
             # 1. Parse ICS
@@ -99,16 +100,12 @@ class ICSImportService:
                 return False, "Geen afspraken gevonden in het bestand.", 0, ["No events"]
             
             # 2. Setup connection ONCE
-            user = UserService.get_user(db, user_id)
-            if not user:
-                return False, "Gebruiker niet gevonden.", 0, ["User not found"]
-            
             client = CalDAVClient()
-            if not client.connect(user.username, "admin"):
+            if not client.connect(username, "admin"):
                 return False, "Verbinding met de kalenderserver mislukt.", 0, ["Connection failed"]
             
             # 3. Resolve path and get calendar object ONCE
-            calendar_path, _ = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+            calendar_path, _ = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
             if not calendar_path:
                 return False, "Geen toegang tot deze agenda.", 0, ["Access denied"]
             
@@ -145,7 +142,7 @@ class ICSImportService:
                         errors.append(f"Mislukt: {event_name}")
                 except Exception as ex:
                     errors.append(f"Fout bij {event_name}: {str(ex)}")
-
+            
             total_time = time.time() - start_time
             print(f"[IMPORT] FINISHED: {imported_count} imported in {total_time:.2f}s", flush=True)
             

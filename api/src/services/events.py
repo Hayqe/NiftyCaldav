@@ -7,62 +7,46 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from .caldav_client import CalDAVClient
-from ..models import Calendar
 from ..schemas.events import EventCreate, EventUpdate, EventInDB
-from ..services.users import UserService
 
 
 class EventService:
     """
     Service for managing events through CalDAV.
     This service acts as a bridge between our database and the CalDAV server (Radicale).
+    
+    Note: With the new architecture, users are authenticated via Radicale directly,
+    and we use username (string) instead of user_id (int).
     """
     
     @staticmethod
-    def _get_caldav_client(db: Session, user_id: int) -> Optional[CalDAVClient]:
-        """Get authenticated CalDAV client for user."""
-        user = UserService.get_user(db, user_id)
-        if not user:
-            return None
-        
-        # For now, use username and a default password
-        # In production, this should come from user settings
+    def _get_caldav_client(username: str) -> Optional[CalDAVClient]:
+        """Get authenticated CalDAV client for username."""
         client = CalDAVClient()
-        # Try with the username and the same password (for Radicale htpasswd)
-        # Note: This assumes Radicale uses the same credentials as our DB
-        if client.connect(user.username, "admin"):  # Using admin for demo
+        # Connect with username and default password
+        # In production, password should come from user input or secure storage
+        if client.connect(username, "admin"):  # Using admin for demo
             return client
         return None
     
     @staticmethod
-    def _get_calendar_name(db: Session, calendar_id: int) -> Optional[str]:
-        """Get calendar name from our database."""
-        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
-        if calendar:
-            return calendar.name
-        return None
-    
-    @staticmethod
-    def _resolve_calendar_path(db: Session, client: CalDAVClient, user_id: int, calendar_id: int) -> Tuple[Optional[str], Optional[str]]:
+    def _get_calendar_name_from_id(
+        db: Session, 
+        client: CalDAVClient, 
+        username: str, 
+        calendar_id: int
+    ) -> Tuple[Optional[str], Optional[str]]:
         """
-        Resolve calendar path (username/name) and display name from either DB ID or virtual ID (hash).
+        Resolve calendar path (username/name) and display name from virtual ID (hash).
         Returns (calendar_path, calendar_name).
         """
         import hashlib
         
-        # 1. Try database first
-        calendar = db.query(Calendar).filter(Calendar.id == calendar_id).first()
-        if calendar:
-            user = UserService.get_user(db, calendar.owner_id)
-            username = user.username if user else 'admin'
-            return f"{username}/{calendar.name}", calendar.name
-            
-        # 2. Try Radicale for virtual ID
-        user = UserService.get_user(db, user_id)
-        if not user:
+        # For now, we only use virtual IDs (hash from URL)
+        # Get all calendars from Radicale and check hashes
+        if not client.connect(username, "admin"):
             return None, None
             
-        # Get all calendars from Radicale and check hashes
         raw_calendars = client.get_calendars()
         for cal_info in raw_calendars:
             cal_url = cal_info.get('url')
@@ -70,33 +54,35 @@ class EventService:
             
             if url_hash == calendar_id:
                 cal_name = cal_info.get('name')
-                cal_owner = cal_info.get('owner_username') or user.username
+                cal_owner = cal_info.get('owner_username') or username
                 return f"{cal_owner}/{cal_name}", cal_name
                 
         return None, None
-
+    
     @staticmethod
     def create_event(
         db: Session, 
         event: EventCreate, 
-        user_id: int,
+        username: str,
         calendar_id: int
     ) -> Optional[EventInDB]:
         """
         Create a new event in the specified calendar via CalDAV.
         """
-        client = EventService._get_caldav_client(db, user_id)
+        client = EventService._get_caldav_client(username)
         if not client:
             return None
         
-        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
         if not calendar_path:
             return None
         
         try:
             # First ensure calendar exists in CalDAV
             if not client.calendar_exists(calendar_path):
-                client.create_calendar(calendar_path)
+                # Extract just the name part for creation
+                cal_name_only = calendar_path.split('/')[-1] if '/' in calendar_path else calendar_path
+                client.create_calendar(cal_name_only)
             
             event_url = client.create_event(
                 calendar_name=calendar_path,
@@ -133,17 +119,17 @@ class EventService:
     def get_event(
         db: Session,
         event_id: str,
-        user_id: int,
+        username: str,
         calendar_id: int
     ) -> Optional[EventInDB]:
         """
         Get a specific event by its CalDAV URL.
         """
-        client = EventService._get_caldav_client(db, user_id)
+        client = EventService._get_caldav_client(username)
         if not client:
             return None
         
-        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
         if not calendar_path:
             return None
         
@@ -173,7 +159,7 @@ class EventService:
     @staticmethod
     def list_events(
         db: Session,
-        user_id: int,
+        username: str,
         calendar_id: Optional[int] = None,
         start: Optional[datetime] = None,
         end: Optional[datetime] = None
@@ -183,12 +169,9 @@ class EventService:
         If calendar_id is specified, only get events from that calendar.
         """
         import hashlib
-        user = UserService.get_user(db, user_id)
-        if not user:
-            return []
         
         client = CalDAVClient()
-        if not client.connect(user.username, "admin"):
+        if not client.connect(username, "admin"):
             return []
         
         try:
@@ -199,7 +182,7 @@ class EventService:
             
             if calendar_id:
                 # Resolve the specific calendar
-                calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+                calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
                 if not calendar_path:
                     return []
                 calendar_paths = [calendar_path]
@@ -211,19 +194,15 @@ class EventService:
                 for cal_info in raw_calendars:
                     cal_name = cal_info.get('name')
                     cal_url = cal_info.get('url')
-                    cal_owner = cal_info.get('owner_username') or user.username
+                    cal_owner = cal_info.get('owner_username') or username
                     
                     cal_path = f"{cal_owner}/{cal_name}"
-                    # Check if it's in DB for proper ID
-                    db_cal = db.query(Calendar).filter(Calendar.name == cal_name).first()
-                    if db_cal:
-                        cal_id = db_cal.id
-                    else:
-                        # Generate virtual ID
-                        cal_id = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
-                        
+                    
+                    # Generate virtual ID from URL
+                    url_hash = int(hashlib.md5(cal_url.encode()).hexdigest()[:8], 16) % (2**31)
+                    
                     calendar_paths.append(cal_path)
-                    calendar_id_map[cal_path] = cal_id
+                    calendar_id_map[cal_path] = url_hash
                     calendar_name_map[cal_path] = cal_name
             
             all_events = []
@@ -266,17 +245,17 @@ class EventService:
         db: Session,
         event_id: str,
         event: EventUpdate,
-        user_id: int,
+        username: str,
         calendar_id: int
     ) -> Optional[EventInDB]:
         """
         Update an existing event in CalDAV.
         """
-        client = EventService._get_caldav_client(db, user_id)
+        client = EventService._get_caldav_client(username)
         if not client:
             return None
         
-        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
         if not calendar_path:
             return None
         
@@ -295,9 +274,8 @@ class EventService:
             all_day = event.all_day if event.all_day is not None else old_event_data.get('all_day', False)
             
             # We need just the calendar name for client.update_event
-            # which extracts the name from calendar_path if it has /
             cal_name_only = calendar_path.split('/')[-1] if '/' in calendar_path else calendar_path
-
+            
             success = client.update_event(
                 calendar_name=cal_name_only,
                 event_id=event_id,
@@ -334,17 +312,17 @@ class EventService:
     def delete_event(
         db: Session,
         event_id: str,
-        user_id: int,
+        username: str,
         calendar_id: int
     ) -> bool:
         """
         Delete an event from CalDAV.
         """
-        client = EventService._get_caldav_client(db, user_id)
+        client = EventService._get_caldav_client(username)
         if not client:
             return False
         
-        calendar_path, calendar_name = EventService._resolve_calendar_path(db, client, user_id, calendar_id)
+        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
         if not calendar_path:
             return False
         

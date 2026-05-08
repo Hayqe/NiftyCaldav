@@ -1,20 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Bell, Palette, User, ChevronLeft, Upload, Calendar, Trash2, Users, Key } from 'lucide-react';
-import { useAuth, useSettings, useUpdateSettings, useMyCalendars, useSharedCalendars, useCalendarShares, useDeleteCalendar, useAddShare, useUpdateShare, useRemoveShare, useCreateUserWithOTP, useResetUserPassword, useDeleteUser } from '@/hooks';
+import { Bell, Palette, User, ChevronLeft, Upload, Users, Settings, Plus, Check, Copy, RefreshCw } from 'lucide-react';
+import { useAuth, useMySettings, useUsers } from '@/hooks';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { usersApi } from '@/services/api';
 import { CALENDAR_COLORS, TIMEZONES, LANGUAGES } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { User as UserType, UserSettings, ApiResponse } from '@/types';
 
-type TabType = 'profile' | 'notifications' | 'appearance' | 'general' | 'calendars' | 'users';
+type TabType = 'profile' | 'notifications' | 'appearance' | 'general' | 'users';
 
 export default function SettingsPage() {
-  // Check if current user is admin (username === 'admin')
-  const userFromStorage = localStorage.getItem('user');
-  const cachedUser = userFromStorage ? JSON.parse(userFromStorage) : null;
-  const isAdmin = cachedUser?.username === 'admin';
-  
   const [activeTab, setActiveTab] = useState<TabType>('profile');
   const navigate = useNavigate();
+  const { user } = useAuth();
 
   return (
     <div className="space-y-6">
@@ -34,11 +33,11 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Sidebar Navigation */}
-        <SettingsSidebar activeTab={activeTab} setActiveTab={setActiveTab} isAdmin={isAdmin} />
-        
+        <SettingsSidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
+
         {/* Main Content */}
         <div className="md:col-span-3">
-          <SettingsContent activeTab={activeTab} isAdmin={isAdmin} />
+          <SettingsContent activeTab={activeTab} user={user} />
         </div>
       </div>
     </div>
@@ -49,10 +48,12 @@ export default function SettingsPage() {
 interface SettingsSidebarProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
-  isAdmin: boolean;
+  user: UserType | null;
 }
 
-function SettingsSidebar({ activeTab, setActiveTab, isAdmin }: SettingsSidebarProps) {
+function SettingsSidebar({ activeTab, setActiveTab, user }: SettingsSidebarProps) {
+  const navigate = useNavigate();
+
   return (
     <div className="md:col-span-1">
       <div className="bg-white rounded-xl border border-gray-200 p-4">
@@ -85,25 +86,18 @@ function SettingsSidebar({ activeTab, setActiveTab, isAdmin }: SettingsSidebarPr
             <Settings className="w-5 h-5" />
             <span>Algemeen</span>
           </button>
-          <button
-            onClick={() => setActiveTab('calendars')}
-            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'calendars' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-          >
-            <Calendar className="w-5 h-5" />
-            <span>Agenda's</span>
-          </button>
-          {isAdmin && (
+          {user?.role === 'admin' && (
             <button
               onClick={() => setActiveTab('users')}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'users' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
             >
               <Users className="w-5 h-5" />
-              <span>Gebruikers beheren</span>
+              <span>Gebruikers</span>
             </button>
           )}
         </nav>
       </div>
-      
+
       {/* ICS Import Option */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
         <button
@@ -121,26 +115,13 @@ function SettingsSidebar({ activeTab, setActiveTab, isAdmin }: SettingsSidebarPr
 // Main Content Component
 interface SettingsContentProps {
   activeTab: TabType;
-  isAdmin: boolean;
+  user: UserType | null;
 }
 
-function SettingsContent({ activeTab, isAdmin }: SettingsContentProps) {
-  const { user, changePassword } = useAuth();
-  const { data: settingsData, isLoading: isLoadingSettings } = useSettings();
-  const { mutate: updateSettings, isPending: isUpdatingSettings } = useUpdateSettings();
-  const { data: myCalendarsData, isLoading: isLoadingMyCalendars } = useMyCalendars();
-  const { data: sharedCalendarsData, isLoading: isLoadingSharedCalendars } = useSharedCalendars();
-  const { mutate: deleteCalendar, isPending: isDeletingCalendar } = useDeleteCalendar();
-  const { mutate: addShare, isPending: isAddingShare } = useAddShare();
-  const { mutate: updateShare, isPending: isUpdatingShare } = useUpdateShare();
-  const { mutate: removeShare, isPending: isRemovingShare } = useRemoveShare();
-  const { mutate: createUserWithOTP, isPending: isCreatingUser } = useCreateUserWithOTP();
-  const { mutate: resetUserPassword, isPending: isResettingPassword } = useResetUserPassword();
-  const { mutate: deleteUser, isPending: isDeletingUser } = useDeleteUser();
-
-  const myCalendars = myCalendarsData?.data || [];
-  const sharedCalendars = sharedCalendarsData?.data || [];
-  const settings = settingsData?.data;
+function SettingsContent({ activeTab, user }: SettingsContentProps) {
+  const { changePassword } = useAuth();
+  const { data: settingsData, isLoading: isLoadingSettings, update } = useMySettings();
+  const settings = settingsData;
 
   if (isLoadingSettings) {
     return (
@@ -161,43 +142,389 @@ function SettingsContent({ activeTab, isAdmin }: SettingsContentProps) {
       {activeTab === 'notifications' && (
         <NotificationsTab
           settings={settings}
-          updateSettings={updateSettings}
-          isUpdatingSettings={isUpdatingSettings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
         />
       )}
       {activeTab === 'appearance' && (
         <AppearanceTab
           settings={settings}
-          updateSettings={updateSettings}
-          isUpdatingSettings={isUpdatingSettings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
         />
       )}
       {activeTab === 'general' && (
         <GeneralTab
           settings={settings}
-          updateSettings={updateSettings}
-          isUpdatingSettings={isUpdatingSettings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
         />
       )}
-      {activeTab === 'calendars' && (
-        <CalendarTab
-          myCalendars={myCalendars}
-          sharedCalendars={sharedCalendars}
-          deleteCalendar={deleteCalendar}
-          isDeletingCalendar={isDeletingCalendar}
-          addShare={addShare}
-          updateShare={updateShare}
-          removeShare={removeShare}
-          isAddingShare={isAddingShare}
-          isUpdatingShare={isUpdatingShare}
-          isRemovingShare={isRemovingShare}
-          isLoading={isLoadingMyCalendars || isLoadingSharedCalendars}
-        />
-      )}
-      {activeTab === 'users' && isAdmin && (
+      {activeTab === 'users' && user?.role === 'admin' && (
         <UsersTab />
       )}
     </>
+  );
+}
+
+// Helper function for role badge
+function getUserRoleBadge(role: string) {
+  switch (role) {
+    case 'admin':
+      return <span className="badge bg-red-100 text-red-700">Admin</span>;
+    case 'user':
+      return <span className="badge bg-blue-100 text-blue-700">Gebruiker</span>;
+    default:
+      return <span className="badge bg-gray-100 text-gray-700">{role}</span>;
+  }
+}
+
+// Users Tab Component
+function UsersTab() {
+  const queryClient = useQueryClient();
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  
+  // Success notification state
+  const [successNotification, setSuccessNotification] = useState<{
+    username: string;
+    password: string;
+    message: string;
+  } | null>(null);
+
+  // Get list of users with settings
+  const { data: usersData, isLoading: isLoadingUsers, refetch: refetchUsers } = useUsers();
+
+  // Also fetch OTP status for each user
+  const { data: usersSettings } = useQuery({
+    queryKey: ['users-settings'],
+    queryFn: async () => {
+      if (!usersData || usersData.length === 0) return [];
+      const settingsPromises = usersData.map(user => 
+        usersApi.getSettings(user.username).then(res => res.data).catch(() => null)
+      );
+      return Promise.all(settingsPromises);
+    },
+    enabled: !!usersData && usersData.length > 0,
+  });
+
+  // Merge user data with OTP status
+  const users: UserType[] = (usersData || []).map((user, index) => ({
+    ...user,
+    must_change_password: usersSettings?.[index]?.otp || false
+  }));
+
+  // Create user mutation
+  const createUserMutation = useMutation({
+    mutationFn: (username: string) => usersApi.createUser(username),
+    onSuccess: (response) => {
+      setSuccessNotification({
+        username: response.data.username,
+        password: response.data.password,
+        message: response.data.message
+      });
+      // Refresh users list
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['users-settings'] });
+    },
+    onError: (err) => {
+      alert(`Fout bij aanmaken gebruiker: ${err instanceof Error ? err.message : 'Onbekende fout'}`);
+    }
+  });
+
+  // Reset password mutation
+  const resetPasswordMutation = useMutation({
+    mutationFn: (username: string) => usersApi.resetUserPassword(username),
+    onSuccess: (response) => {
+      setSuccessNotification({
+        username: response.data.username,
+        password: response.data.new_password,
+        message: response.data.message
+      });
+      // Refresh users settings to show OTP flag
+      queryClient.invalidateQueries({ queryKey: ['users-settings'] });
+    },
+    onError: (err) => {
+      alert(`Fout bij resetten wachtwoord: ${err instanceof Error ? err.message : 'Onbekende fout'}`);
+    }
+  });
+
+  const handleResetPassword = (username: string) => {
+    if (confirm(`Weet je zeker dat je het wachtwoord voor ${username} wilt resetten?`)) {
+      resetPasswordMutation.mutate(username);
+    }
+  };
+
+  if (isLoadingUsers) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="lg" text="Gebruikers laden..." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-lg font-semibold text-gray-900">Gebruikersbeheer</h2>
+        <button
+          onClick={() => setIsAddUserModalOpen(true)}
+          className="btn btn-primary p-2"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
+      
+      {/* Success Notification */}
+      {successNotification && (
+        <SuccessNotification
+          username={successNotification.username}
+          password={successNotification.password}
+          message={successNotification.message}
+          onDismiss={() => setSuccessNotification(null)}
+        />
+      )}
+
+      {/* Users Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Gebruikersnaam
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Rol
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Wachtwoord status
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                Actie
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {users.length > 0 ? (
+              users.map(user => (
+                <tr key={user.username} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{user.username}</div>
+                  </td>
+                  <td className="px-4 py-3">{getUserRoleBadge(user.role)}</td>
+                  <td className="px-4 py-3">
+                    {user.must_change_password ? (
+                      <span className="badge bg-yellow-100 text-yellow-700">Moet wachtwoord wijzigen</span>
+                    ) : (
+                      <span className="badge bg-green-100 text-green-700">OK</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleResetPassword(user.username)}
+                      className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg"
+                      title="Wachtwoord resetten"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                  Geen gebruikers gevonden
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add User Modal */}
+      <AddUserModal
+        isOpen={isAddUserModalOpen}
+        onClose={() => setIsAddUserModalOpen(false)}
+        onSuccess={(username, password) => {
+          setSuccessNotification({
+            username,
+            password,
+            message: `Gebruiker '${username}' is succesvol aangemaakt.`
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+// Success Notification Component
+interface SuccessNotificationProps {
+  username: string;
+  password: string;
+  message: string;
+  onDismiss: () => void;
+}
+
+function SuccessNotification({ username, password, message, onDismiss }: SuccessNotificationProps) {
+  const [copied, setCopied] = useState(false);
+
+  // Auto-dismiss after 30 seconds
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 30000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed top-4 right-4 bg-orange-100 border-2 border-orange-400 rounded-xl p-4 shadow-lg z-50 max-w-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0">
+          <Check className="w-6 h-6 text-orange-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-orange-800 truncate">{message}</h3>
+          <p className="text-sm text-orange-700 mt-1">
+            Gebruikersnaam: <span className="font-mono font-semibold">{username}</span>
+          </p>
+          <div className="mt-2 p-2 bg-white rounded border border-orange-200">
+            <code className="text-sm font-mono break-all text-orange-800">{password}</code>
+          </div>
+          <button
+            onClick={copyToClipboard}
+            className="mt-2 flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800 transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Gekopieerd!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                <span>Kopieer wachtwoord</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Add User Modal Component
+interface AddUserModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (username: string, password: string) => void;
+}
+
+function AddUserModal({ isOpen, onClose, onSuccess }: AddUserModalProps) {
+  const [username, setUsername] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createMutation = useMutation({
+    mutationFn: (username: string) => usersApi.createUser(username),
+    onSuccess: (response) => {
+      onSuccess(response.data.username, response.data.password);
+      setUsername('');
+      setError(null);
+      onClose();
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Onbekende fout bij aanmaken gebruiker');
+      setIsCreating(false);
+    }
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    
+    if (!username.trim()) {
+      setError('Gebruikersnaam is verplicht');
+      return;
+    }
+    
+    if (username.toLowerCase() === 'admin') {
+      setError('Gebruikersnaam "admin" is gereserveerd');
+      return;
+    }
+    
+    setIsCreating(true);
+    createMutation.mutate(username);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Gebruiker toevoegen</h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100">
+            <span className="text-2xl text-gray-400">&times;</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Gebruikersnaam
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              placeholder="Voer gebruikersnaam in"
+              disabled={isCreating}
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-secondary"
+              disabled={isCreating}
+            >
+              Annuleren
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isCreating || !username.trim()}
+            >
+              {isCreating ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Aanmaken...</span>
+                </>
+              ) : (
+                'Gebruiker aanmaken'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -244,6 +571,19 @@ function ProfileTab({ user, changePassword }: ProfileTabProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Wijzig wachtwoord</h2>
+      
+      <div className="bg-gray-50 rounded-lg p-4 mb-6">
+        <h3 className="font-medium text-gray-900 mb-2">Huidige gebruiker</h3>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
+            <span className="text-primary-700 font-semibold text-xl">{user?.username?.charAt(0).toUpperCase()}</span>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">{user?.username}</p>
+            <p className="text-sm text-gray-500">{user?.role === 'admin' ? 'Administrator' : 'Gebruiker'}</p>
+          </div>
+        </div>
+      </div>
       
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
@@ -316,18 +656,14 @@ function ProfileTab({ user, changePassword }: ProfileTabProps) {
 // Notifications Tab Component
 interface NotificationsTabProps {
   settings: any;
-  updateSettings: (data: any) => Promise<void>;
+  updateSettings: (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>;
   isUpdatingSettings: boolean;
 }
 
-function NotificationsTab({ settings, updateSettings, isUpdatingSettings }: NotificationsTabProps) {
-  const [success, setSuccess] = useState<string | null>(null);
-
+function NotificationsTab({ settings, updateSettings }: NotificationsTabProps) {
   const handleSave = async () => {
     try {
       await updateSettings({ notifications_enabled: !settings?.notifications_enabled });
-      setSuccess('Instellingen opgeslagen');
-      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       // Error handling
     }
@@ -336,12 +672,6 @@ function NotificationsTab({ settings, updateSettings, isUpdatingSettings }: Noti
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Meldingen</h2>
-      
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg text-sm mb-4">
-          {success}
-        </div>
-      )}
 
       <div className="space-y-6 max-w-md">
         <div className="flex items-center justify-between">
@@ -355,7 +685,6 @@ function NotificationsTab({ settings, updateSettings, isUpdatingSettings }: Noti
               checked={settings?.notifications_enabled || false}
               onChange={handleSave}
               className="sr-only peer"
-              disabled={isUpdatingSettings}
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
           </label>
@@ -366,13 +695,7 @@ function NotificationsTab({ settings, updateSettings, isUpdatingSettings }: Noti
 }
 
 // Appearance Tab Component
-function AppearanceTab({ settings, updateSettings, isUpdatingSettings }: NotificationsTabProps) {
-  const [success, setSuccess] = useState<string | null>(null);
-
-  const handleSave = async () => {
-    // Save appearance settings
-  };
-
+function AppearanceTab({ settings }: NotificationsTabProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Uiterlijk</h2>
@@ -393,11 +716,7 @@ function AppearanceTab({ settings, updateSettings, isUpdatingSettings }: Notific
         </div>
 
         <div className="pt-4">
-          <button
-            onClick={handleSave}
-            disabled={isUpdatingSettings}
-            className="btn btn-primary"
-          >
+          <button className="btn btn-primary">
             Opslaan
           </button>
         </div>
@@ -407,18 +726,15 @@ function AppearanceTab({ settings, updateSettings, isUpdatingSettings }: Notific
 }
 
 // General Tab Component
-function GeneralTab({ settings, updateSettings, isUpdatingSettings }: NotificationsTabProps) {
+function GeneralTab({ settings, updateSettings }: NotificationsTabProps) {
   const [formData, setFormData] = useState({
     timezone: settings?.timezone || 'Europe/Amsterdam',
     language: settings?.language || 'nl',
   });
-  const [success, setSuccess] = useState<string | null>(null);
 
   const handleSave = async () => {
     try {
       await updateSettings(formData);
-      setSuccess('Instellingen opgeslagen');
-      setTimeout(() => setSuccess(null), 3000);
     } catch (err) {
       // Error
     }
@@ -427,12 +743,6 @@ function GeneralTab({ settings, updateSettings, isUpdatingSettings }: Notificati
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Algemeen</h2>
-      
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg text-sm mb-4">
-          {success}
-        </div>
-      )}
 
       <div className="space-y-6 max-w-md">
         <div>
@@ -472,309 +782,11 @@ function GeneralTab({ settings, updateSettings, isUpdatingSettings }: Notificati
         <div className="pt-4">
           <button
             onClick={handleSave}
-            disabled={isUpdatingSettings}
             className="btn btn-primary"
           >
             Opslaan
           </button>
         </div>
-      </div>
-    </div>
-  );
-}
-
-// Calendar Tab Component (simplified - keep existing for now)
-function CalendarTab({ myCalendars, sharedCalendars, deleteCalendar, isDeletingCalendar, addShare, updateShare, removeShare, isAddingShare, isUpdatingShare, isRemovingShare, isLoading }: any) {
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6">Agenda's beheer</h2>
-      <p className="text-gray-500">Agenda beheer functionaliteit (bestaande implementatie)</p>
-    </div>
-  );
-}
-
-// Users Tab Component (Admin only)
-function UsersTab() {
-  const [users, setUsers] = useState<any[]>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  const [isCreatingUser, setIsCreatingUser] = useState(false);
-  const [isResettingPassword, setIsResettingPassword] = useState(false);
-  const [isDeletingUser, setIsDeletingUser] = useState(false);
-  const [userError, setUserError] = useState<string | null>(null);
-  const [userSuccess, setUserSuccess] = useState<string | null>(null);
-  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
-  const [newUsername, setNewUsername] = useState('');
-  const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user');
-
-  // Load users on mount
-  useEffect(() => {
-    const fetchUsers = async () => {
-      setIsLoadingUsers(true);
-      setUserError(null);
-      try {
-        const { usersApi } = await import('@/services/api');
-        const response = await usersApi.getAll();
-        setUsers(response?.data || []);
-      } catch (err) {
-        setUserError('Fout bij laden gebruikers');
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
-    fetchUsers();
-  }, []);
-
-  // SIMPLE: Direct API call without React Query
-  const handleCreateUser = async () => {
-    if (!newUsername.trim()) {
-      setUserError('Gebruikersnaam is verplicht');
-      return;
-    }
-    
-    if (newUsername.length < 3) {
-      setUserError('Gebruikersnaam moet minimaal 3 tekens bevatten');
-      return;
-    }
-
-    try {
-      setUserError(null);
-      setUserSuccess(null);
-      setIsCreatingUser(true);
-      
-      const { default: api } = await import('@/services/api');
-      const response = await api.post('/users/create-with-otp', null, { 
-        params: { username: newUsername, role: newUserRole } 
-      });
-      
-      console.log('Create user response:', response);
-      console.log('Create user OTP:', response.data.one_time_password);
-      
-      setGeneratedPassword(response.data.one_time_password || '');
-      setNewUsername('');
-      setNewUserRole('user');
-      setUserSuccess('Gebruiker aangemaakt! One-time wachtwoord gegenereerd.');
-      
-      // Refresh users list
-      const { usersApi } = await import('@/services/api');
-      const result = await usersApi.getAll();
-      setUsers(result?.data || []);
-      
-    } catch (err: any) {
-      console.error('Create user error:', err);
-      console.error('Error response:', err.response);
-      setUserError(err.response?.data?.detail || err.message || 'Fout bij aanmaken gebruiker');
-    } finally {
-      setIsCreatingUser(false);
-    }
-  };
-
-  const handleResetPassword = async (userId: number, username: string) => {
-    try {
-      setUserError(null);
-      setUserSuccess(null);
-      setIsResettingPassword(true);
-      
-      // Direct axios call - no React Query
-      const { default: api } = await import('@/services/api');
-      const response = await api.post(`/users/${userId}/reset-password`);
-      
-      console.log('Direct API response:', response);
-      console.log('Direct response.data:', response.data);
-      console.log('Direct OTP:', response.data.one_time_password);
-      
-      setGeneratedPassword(`${username}: ${response.data.one_time_password || ''}`);
-      setUserSuccess(`Wachtwoord voor ${username} gereset!`);
-      
-      // Refresh users list
-      const { usersApi } = await import('@/services/api');
-      const result = await usersApi.getAll();
-      setUsers(result?.data || []);
-      
-    } catch (err: any) {
-      console.error('Reset password error:', err);
-      console.error('Error response:', err.response);
-      setUserError(err.response?.data?.detail || err.message || 'Fout bij resetten wachtwoord');
-    } finally {
-      setTimeout(() => {
-        setUserSuccess(null);
-        setGeneratedPassword(null);
-      }, 10000);
-      setIsResettingPassword(false);
-    }
-  };
-
-  const handleDeleteUser = async (userId: number, username: string) => {
-    if (!window.confirm(`Weet je zeker dat je ${username} wilt verwijderen?`)) {
-      return;
-    }
-    
-    try {
-      setUserError(null);
-      setIsDeletingUser(true);
-      const { default: api } = await import('@/services/api');
-      await api.delete(`/users/${userId}`);
-      setUserSuccess(`Gebruiker ${username} verwijderd`);
-      
-      // Refresh users list
-      const { usersApi } = await import('@/services/api');
-      const result = await usersApi.getAll();
-      setUsers(result?.data || []);
-    } catch (err: any) {
-      setUserError(err.response?.data?.detail || 'Fout bij verwijderen gebruiker');
-    } finally {
-      setTimeout(() => setUserSuccess(null), 3000);
-      setIsDeletingUser(false);
-    }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    setUserSuccess('One-time wachtwoord gekopieerd!');
-    setTimeout(() => setUserSuccess(null), 2000);
-  };
-
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Gebruikers beheren</h2>
-      </div>
-
-      {userError && (
-        <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
-          {userError}
-        </div>
-      )}
-
-      {userSuccess && (
-        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg text-sm mb-4">
-          {userSuccess}
-        </div>
-      )}
-
-      {generatedPassword && (
-        <div className="bg-primary-600 text-white px-6 py-4 rounded-lg mb-4 shadow-lg">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-lg font-medium mb-1">Wachtwoord voor {generatedPassword.split(':')[0]} gereset</p>
-              <p className="text-xl font-bold">One-time wachtwoord: <span className="font-mono">{generatedPassword.split(':')[1]}</span></p>
-            </div>
-            <button
-              onClick={() => copyToClipboard(generatedPassword.split(':')[1])}
-              className="px-4 py-2 bg-white text-primary-600 rounded-lg font-medium hover:bg-gray-100 transition-colors whitespace-nowrap"
-            >
-              Kopiëren
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Create new user */}
-      <div className="bg-gray-50 rounded-xl p-4 mb-6">
-        <h3 className="font-semibold text-gray-900 mb-4">Nieuwe gebruiker toevoegen</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Gebruikersnaam
-            </label>
-            <input
-              type="text"
-              value={newUsername}
-              onChange={(e) => setNewUsername(e.target.value)}
-              placeholder="Gebruikersnaam"
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              disabled={isCreatingUser}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Rol
-            </label>
-            <select
-              value={newUserRole}
-              onChange={(e) => setNewUserRole(e.target.value as 'user' | 'admin')}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              disabled={isCreatingUser}
-            >
-              <option value="user">Gebruiker</option>
-              <option value="admin">Administrator</option>
-            </select>
-          </div>
-          <button
-            onClick={handleCreateUser}
-            disabled={isCreatingUser || !newUsername.trim()}
-            className="btn btn-primary"
-          >
-            {isCreatingUser ? <LoadingSpinner size="sm" /> : 'Gebruiker aanmaken'}
-          </button>
-        </div>
-      </div>
-
-      {/* Users list */}
-      <div>
-        <h3 className="font-semibold text-gray-900 mb-4">Huidige gebruikers</h3>
-        
-        {isLoadingUsers ? (
-          <div className="flex items-center justify-center py-8">
-            <LoadingSpinner size="md" text="Gebruikers laden..." />
-          </div>
-        ) : users.length === 0 ? (
-          <p className="text-sm text-gray-500 text-center py-4">Geen gebruikers gevonden.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b border-gray-200">
-                  <th className="text-left py-3 px-4 font-medium text-gray-500 text-sm">Gebruiker</th>
-                  <th className="text-left py-3 px-4 font-medium text-gray-500 text-sm">Rol</th>
-                  <th className="text-right py-3 px-4 font-medium text-gray-500 text-sm">Acties</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {users.map(userItem => (
-                  <tr key={userItem.id} className="hover:bg-gray-50">
-                    <td className="py-3 px-4">
-                      <div>
-                        <p className="font-medium text-gray-900">{userItem.username}</p>
-                        {userItem.must_change_password && (
-                          <p className="text-xs text-amber-600">Moet wachtwoord wijzigen</p>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={`px-2 py-1 rounded text-xs ${
-                        userItem.role === 'admin' 
-                          ? 'bg-amber-100 text-amber-800' 
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {userItem.role === 'admin' ? 'Administrator' : 'Gebruiker'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => handleResetPassword(userItem.id, userItem.username)}
-                          disabled={isResettingPassword}
-                          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm text-gray-700 transition-colors disabled:opacity-50"
-                          title="Wachtwoord resetten"
-                        >
-                          <Key className="w-4 h-4 inline" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteUser(userItem.id, userItem.username)}
-                          disabled={isDeletingUser}
-                          className="px-3 py-1.5 bg-red-100 hover:bg-red-200 rounded-lg text-sm text-red-700 transition-colors disabled:opacity-50"
-                          title="Verwijderen"
-                        >
-                          <Trash2 className="w-4 h-4 inline" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </div>
     </div>
   );

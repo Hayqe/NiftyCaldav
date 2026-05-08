@@ -3,15 +3,14 @@ ICS Import routes.
 """
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
-from typing import Annotated
+from typing import Annotated, Dict, Any
 from datetime import datetime
 
 from ..database import get_db
-from ..models import User, Calendar
 from ..schemas.ics import ICSImportResult, ICSImportRequest
 from ..services.ics_import import ICSImportService
 from ..services.calendars import CalendarService
-from .dependencies import get_current_active_user
+from .dependencies import get_current_active_user, get_current_user_info
 
 router = APIRouter(prefix="/ics", tags=["ics"])
 
@@ -21,12 +20,14 @@ async def import_ics(
     calendar_id: int,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_user_info)
 ):
     """
     Import an ICS file into a calendar.
     """
     print(f"[ROUTE] Received ICS import request for calendar {calendar_id}", flush=True)
+    username = current_user["username"]
+    
     try:
         # Read file content
         print(f"[ROUTE] Reading file: {file.filename}", flush=True)
@@ -37,7 +38,7 @@ async def import_ics(
         
         # Import ICS
         success, message, imported_count, errors = ICSImportService.import_ics_to_calendar(
-            db, ics_content, current_user.id, calendar_id
+            db, ics_content, username, calendar_id
         )
         
         if not success:
@@ -71,12 +72,14 @@ async def import_ics_from_url(
     request: ICSImportRequest,
     ics_url: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_user_info)
 ):
     """
     Import an ICS file from a URL into a calendar.
     """
     import httpx
+    
+    username = current_user["username"]
     
     try:
         # Fetch ICS from URL
@@ -87,7 +90,7 @@ async def import_ics_from_url(
         
         # Import ICS
         success, message, imported_count, errors = ICSImportService.import_ics_to_calendar(
-            db, ics_content, current_user.id, request.calendar_id
+            db, ics_content, username, request.calendar_id
         )
         
         if not success:

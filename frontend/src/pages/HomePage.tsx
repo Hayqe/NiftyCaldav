@@ -115,7 +115,7 @@ export default function HomePage() {
 
   // Handle cell click for event creation
   const handleDateClick = (date: Date) => {
-    const defaultCalId = settings?.default_calendar_id;
+    const defaultCalId = settings?.default_calendar;
     const calendarId = (defaultCalId && [...myCalendars, ...sharedCalendars].find(c => c.id === defaultCalId)) 
       ? defaultCalId 
       : (activeCalendarIds.length > 0 ? activeCalendarIds[0] : null);

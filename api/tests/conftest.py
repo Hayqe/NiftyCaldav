@@ -6,7 +6,7 @@ from contextlib import contextmanager
 
 from src.main import app
 from src.database.database import Base, engine, SessionLocal
-from src.models import User, UserSettings, Calendar
+from src.models import UserSettings, SharedCalendar, CalendarShare
 from src.services.auth import AuthService
 from src.services.caldav_client import CalDAVClient
 
@@ -43,19 +43,24 @@ def client():
     Base.metadata.create_all(bind=test_engine)
     
     with get_test_db() as db:
-        # Create admin user
-        # Note: Radicale user 'admin' with password 'admin' should exist
-        admin = User(
-            username="admin",
-            password_hash=AuthService.hash_password("admin"),
-            role="admin"
-        )
-        db.add(admin)
-        db.commit()
-        db.refresh(admin)
+        # Create initial user settings for admin and testuser
+        # Note: Users are authenticated via Radicale, not DB
+        # We only need to create settings entries for testing
+        admin_settings = UserSettings(radicale_username="admin")
+        db.add(admin_settings)
         
-        settings = UserSettings(user_id=admin.id)
-        db.add(settings)
+        testuser_settings = UserSettings(radicale_username="testuser")
+        db.add(testuser_settings)
+        
+        user1_settings = UserSettings(radicale_username="user1")
+        db.add(user1_settings)
+        
+        user2_settings = UserSettings(radicale_username="user2")
+        db.add(user2_settings)
+        
+        user3_settings = UserSettings(radicale_username="user3")
+        db.add(user3_settings)
+        
         db.commit()
     
     yield TestClient(app)
@@ -66,43 +71,26 @@ def client():
 
 @pytest.fixture
 def admin_token(client):
-    """Get a JWT token for the admin user."""
+    """Get a JWT token for the admin user (authenticated via Radicale)."""
+    # Authenticate with Radicale credentials
+    # Radicale should have user "admin" with password "admin"
     response = client.post(
         "/auth/login",
-        headers={"Authorization": "Basic YWRtaW46YWRtaW4="}
+        headers={"Authorization": "Basic YWRtaW46YWRtaW4="}  # admin:admin base64
     )
+    if response.status_code != 200:
+        raise Exception(f"Failed to get admin token: {response.status_code} - {response.text}")
     return response.json()["access_token"]
 
 
 @pytest.fixture
-def test_calendar(client, admin_token):
-    """Fixture to create and clean up a test calendar in Radicale."""
-    calendar_name = "IntegrationTestCalendar"
+def db():
+    """Get a test database session."""
+    # Reset database
+    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
     
-    # Pre-cleanup: ensure it doesn't exist
-    client_caldav = CalDAVClient()
-    if client_caldav.connect("admin", "admin"):
-        if client_caldav.calendar_exists(calendar_name):
-            client_caldav.delete_calendar(calendar_name)
-    
-    # Create calendar via API
-    response = client.post(
-        "/calendars/",
-        json={
-            "name": calendar_name,
-            "description": "Calendar for integration tests"
-        },
-        headers={"Authorization": f"Bearer {admin_token}"}
-    )
-    if response.status_code != 200:
-        print(f"DEBUG: Calendar creation failed with {response.status_code}: {response.text}")
-    assert response.status_code == 200
-    calendar_data = response.json()
-    
-    yield calendar_data
-    
-    # Cleanup: Delete calendar via API
-    client.delete(
-        f"/calendars/{calendar_data['id']}",
-        headers={"Authorization": f"Bearer {admin_token}"}
-    )
+    db = SessionLocal()
+    yield db
+    db.close()
+    Base.metadata.drop_all(bind=test_engine)

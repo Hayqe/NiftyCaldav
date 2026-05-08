@@ -1,63 +1,64 @@
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from typing import Annotated
+from typing import Annotated, Optional, Dict, Any
 
 from ..database import get_db
-from ..models import User
 from ..services.auth import AuthService
-from ..services.users import UserService
 
 security = HTTPBearer()
 
 
-def get_current_user(
-    request: Request,
-    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    db: Session = Depends(get_db)
-) -> User:
+def get_current_user_info(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
+) -> Dict[str, Any]:
     """
-    Get the current authenticated user from JWT token.
-    """
-    import logging
-    logger = logging.getLogger(__name__)
+    Get user info directly from JWT token without database lookup.
     
+    Returns dict with:
+        - username: str (from token)
+        - role: str (from token)
+    """
     token = credentials.credentials
-    logger.info(f"Validating token for request: {request.url}")
-    
     payload = AuthService.verify_token(token)
     
     if not payload:
-        logger.warning(f"Invalid or expired token for request: {request.url}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    user_id = payload.get("sub")
-    if not user_id:
-        logger.warning(f"Invalid token payload (no sub): {request.url}")
+    username = payload.get("username")
+    if not username:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token payload",
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    user = UserService.get_user(db, int(user_id))
-    if not user:
-        logger.warning(f"User not found for id: {user_id}, request: {request.url}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    return {
+        "username": username,
+        "role": payload.get("role", "user")
+    }
+
+
+def get_current_user(
+    request: Request,
+    user_info: Dict[str, Any] = Depends(get_current_user_info)
+) -> Dict[str, Any]:
+    """
+    Get the current authenticated user from JWT token.
     
-    logger.info(f"User authenticated: {user.username}, role: {user.role}, must_change_pw: {user.must_change_password}")
-    return user
+    Returns dict with username and role.
+    All authenticated users pass through this.
+    """
+    return user_info
 
 
-def get_current_active_user(current_user: User = Depends(get_current_user)) -> User:
+def get_current_active_user(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
     """
     Ensure the current user is active (not disabled).
     All users are currently active in this implementation.
@@ -68,39 +69,31 @@ def get_current_active_user(current_user: User = Depends(get_current_user)) -> U
 def get_current_user_from_token(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
-) -> dict:
+) -> Dict[str, Any]:
     """
     Get user info directly from JWT token without database lookup.
-    Returns payload dict with sub (user_id), username, role.
+    Same as get_current_user_info but with Request parameter for compatibility.
     """
-    token = credentials.credentials
-    payload = AuthService.verify_token(token)
-    
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-    
-    return payload
+    return get_current_user_info(credentials)
 
 
-def get_admin_user(current_user: User = Depends(get_current_active_user)) -> User:
+def get_admin_user(current_user: Dict[str, Any] = Depends(get_current_active_user)) -> Dict[str, Any]:
     """
     Ensure the current user has admin privileges.
     """
-    if current_user.role != "admin":
+    if current_user.get("role") != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin privileges required"
         )
     return current_user
+
+
+def get_username_from_token(
+    credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)]
+) -> str:
+    """
+    Extract just the username from the JWT token.
+    """
+    user_info = get_current_user_info(credentials)
+    return user_info["username"]

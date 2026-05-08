@@ -1,19 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Annotated, Optional
+from typing import List, Dict, Any
 
 from ..database import get_db
-from ..models import User, Calendar, CalendarShare
+from ..models import SharedCalendar, CalendarShare
 from ..schemas.calendars import (
-    CalendarCreate, CalendarUpdate, CalendarInDB, CalendarRadicale, 
-    CalendarShareCreate, CalendarShareInDB, CalendarWithShares, CalendarRadicaleWithShares,
-    CalendarWithSharingInfo
+    CalendarCreate, CalendarRadicale, CalendarRadicaleWithShares,
+    CalendarWithSharingInfo, SharedCalendarInDB, CalendarShareInDB, CalendarShareCreate
 )
-from ..schemas.users import UserCreate
-from ..services.calendars import CalendarService
 from ..services.caldav_client import CalDAVClient
-from ..services.users import UserService
-from .dependencies import get_current_active_user, get_admin_user
+from ..services.calendars import CalendarService
+from .dependencies import get_current_active_user, get_admin_user, get_current_user_info
 
 router = APIRouter(prefix="/calendars", tags=["calendars"])
 
@@ -23,14 +20,14 @@ router = APIRouter(prefix="/calendars", tags=["calendars"])
 @router.post("/", response_model=CalendarRadicale, summary="Create a new calendar in Radicale")
 async def create_calendar(
     calendar: CalendarCreate,
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Create a new calendar directly in Radicale (no database).
     Returns calendar info from Radicale.
     """
     import hashlib
-    username = current_user.username
+    username = current_user["username"]
     try:
         result = CalendarService.create_calendar_radicale(calendar, username)
         
@@ -50,14 +47,14 @@ async def create_calendar(
 @router.get("/", response_model=List[CalendarRadicaleWithShares], summary="List all calendars from Radicale")
 async def read_calendars(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     List all calendars for the current user directly from Radicale.
     This only includes personal (non-shared) calendars.
     Shared calendars are available via /calendars/shared.
     """
-    username = current_user.username
+    username = current_user["username"]
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -106,18 +103,17 @@ async def read_calendars(
 async def create_shared_calendar(
     calendar: CalendarCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
-    Create a new calendar with a system-generated username/password.
+    Create a new calendar with a system-generated username/password in Radicale.
     The calendar is owned by the current user and can be shared with others.
     Returns the calendar info with generated credentials.
     """
     import secrets
     import string
-    from typing import Dict, Any
     
-    # Generate random username and password for the new user
+    # Generate random username and password for the new Radicale user
     def generate_random_string(length: int = 12) -> str:
         chars = string.ascii_lowercase + string.digits
         return ''.join(secrets.choice(chars) for _ in range(length))
@@ -125,67 +121,214 @@ async def create_shared_calendar(
     username = f"shared_{generate_random_string(8)}"
     password = generate_random_string(16)
     
-    # Create user in database
-    user_data = UserCreate(username=username, password=password, role="user")
-    new_user = UserService.create_user(db, user_data)
-    
     # Create calendar in Radicale with the new user
     result = CalendarService.create_calendar_radicale(calendar, username)
     
     # Store calendar in database with system credentials
-    db_calendar = Calendar(
+    db_calendar = SharedCalendar(
         name=calendar.name,
         description=calendar.description,
         color=calendar.color or "blue",
-        owner_id=current_user.id,
-        system_username=username,
-        system_password=password,
-        is_shared_calendar=True
+        radicale_username=username,
+        password=password,
+        owner=current_user["username"]
     )
     db.add(db_calendar)
     db.commit()
     db.refresh(db_calendar)
     
-    # Return calendar with generated credentials (not using Pydantic model to include extra fields)
-    return {
-        "id": db_calendar.id,
-        "name": db_calendar.name,
-        "description": db_calendar.description,
-        "color": db_calendar.color,
-        "owner_id": db_calendar.owner_id,
-        "created_at": db_calendar.created_at.isoformat() if db_calendar.created_at else None,
-        "updated_at": db_calendar.updated_at.isoformat() if db_calendar.updated_at else None,
-        "generated_username": username,
-        "generated_password": password,
-        "radicale_url": result.get("url")
-    }
+    return db_calendar
 
 
 # Get shared calendars for current user
 @router.get("/shared", response_model=List[CalendarWithSharingInfo], summary="Get all shared calendars (owned + shared with me)")
 async def read_shared_calendars(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Get all shared calendars for the current user:
     - Calendars owned by the user that are marked as shared
     - Calendars shared with the user by others
     """
-    return CalendarService.get_all_shared_calendars_for_user(db, current_user.id)
+    return CalendarService.get_all_shared_calendars_for_user(db, current_user["username"])
+
+
+@router.get("/shared/{calendar_id}", response_model=SharedCalendarInDB, summary="Get shared calendar by ID")
+async def read_shared_calendar(
+    calendar_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Get a shared calendar by ID.
+    """
+    calendar = CalendarService.get_shared_calendar(db, calendar_id)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared calendar not found"
+        )
+    
+    # Check if user has access (is owner or has share)
+    if not CalendarService.user_has_access(db, calendar_id, current_user["username"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No permission to access this calendar"
+        )
+    
+    return calendar
+
+
+# ==================== Shared Calendar Share Endpoints ====================
+
+@router.post("/shared/{calendar_id}/shares", response_model=CalendarShareInDB, summary="Share calendar with user")
+async def create_share_endpoint(
+    calendar_id: int,
+    share: CalendarShareCreate,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Share a shared calendar with another user by Radicale username.
+    User must be owner or admin.
+    """
+    db_share = CalendarService.create_share(db, calendar_id, share, current_user["username"])
+    if not db_share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found or no permission"
+        )
+    return db_share
+
+
+@router.get("/shared/{calendar_id}/shares", response_model=List[CalendarShareInDB], summary="Get calendar shares")
+async def read_shares(
+    calendar_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Get all shares for a shared calendar. User must be owner or admin.
+    """
+    calendar = CalendarService.get_shared_calendar(db, calendar_id)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found"
+        )
+    
+    if current_user["username"] != calendar.owner and current_user["role"] != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No permission to view shares"
+        )
+    
+    return CalendarService.get_shares_for_calendar(db, calendar_id)
+
+
+@router.put("/shared/{calendar_id}/shares/{username}", response_model=CalendarShareInDB, summary="Update calendar share")
+async def update_share_endpoint(
+    calendar_id: int,
+    username: str,
+    share_data: dict,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Update share permission for a user. User must be owner or admin.
+    """
+    rights = share_data.get("rights")
+    if not rights:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="rights field is required"
+        )
+    
+    db_share = CalendarService.update_share(db, calendar_id, username, rights, current_user["username"])
+    if not db_share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share not found or no permission"
+        )
+    return db_share
+
+
+@router.delete("/shared/{calendar_id}/shares/{username}", status_code=status.HTTP_204_NO_CONTENT, summary="Remove calendar share")
+async def delete_share_endpoint(
+    calendar_id: int,
+    username: str,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Remove share for a user. User must be owner or admin.
+    """
+    success = CalendarService.delete_share(db, calendar_id, username, current_user["username"])
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Share not found or no permission"
+        )
+    return None
+
+
+# ==================== Shared Calendar Deletion ====================
+
+@router.delete("/shared/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete shared calendar")
+async def delete_shared_calendar_endpoint(
+    calendar_id: int,
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Delete a shared calendar. Only owner can delete.
+    """
+    calendar = CalendarService.get_shared_calendar(db, calendar_id)
+    if not calendar:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shared calendar not found"
+        )
+    
+    # Check if current user is owner
+    if calendar.owner != current_user["username"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only owner can delete this calendar"
+        )
+    
+    # Delete from database (cascade will delete shares)
+    db.delete(calendar)
+    db.commit()
+    
+    # Also try to delete from Radicale
+    try:
+        client = CalDAVClient()
+        if client.connect(calendar.radicale_username, calendar.password):
+            # Find the calendar name
+            raw_calendars = client.get_calendars()
+            for cal_info in raw_calendars:
+                if cal_info.get('name') == calendar.name:
+                    client.delete_calendar(cal_info.get('name'))
+                    break
+    except Exception:
+        pass  # Best effort - calendar is deleted from DB
+    
+    return None
 
 
 # Get all calendars (own + shared) with credentials
 @router.get("/my-and-shared", summary="Get all calendars user has access to with credentials")
 async def read_my_and_shared_calendars(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Get all calendars the user owns or has been shared with, including credentials for accessing shared calendars.
     Returns calendar info with generated_username and generated_password for shared calendars.
     """
-    calendars = CalendarService.get_my_and_shared_calendars(db, current_user.id)
+    calendars = CalendarService.get_my_and_shared_calendars(db, current_user["username"])
     return calendars
 
 
@@ -194,12 +337,12 @@ async def read_my_and_shared_calendars(
 @router.get("/{calendar_id}", response_model=CalendarRadicaleWithShares, summary="Get calendar by ID (Radicale)")
 async def read_calendar(
     calendar_id: int,
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Get calendar by ID (hash from URL) directly from Radicale.
     """
-    username = current_user.username
+    username = current_user["username"]
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -241,14 +384,14 @@ async def read_calendar(
 @router.put("/{calendar_id}", response_model=CalendarRadicale, summary="Update calendar (Radicale)")
 async def update_calendar(
     calendar_id: int,
-    calendar: CalendarUpdate,
-    current_user: User = Depends(get_current_active_user)
+    calendar: CalendarCreate,
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Update calendar directly in Radicale.
     Currently limited to description updates.
     """
-    username = current_user.username
+    username = current_user["username"]
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -284,12 +427,12 @@ async def update_calendar(
 @router.delete("/{calendar_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete calendar (Radicale)")
 async def delete_calendar(
     calendar_id: int,
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Delete calendar directly from Radicale.
     """
-    username = current_user.username
+    username = current_user["username"]
     client = CalDAVClient()
     if not client.connect(username, "admin"):
         raise HTTPException(
@@ -336,13 +479,13 @@ async def delete_calendar(
 async def check_write_permission(
     calendar_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Check if the current user has write permission on the specified calendar.
     Returns True if user can write to the calendar.
     """
-    has_permission = CalendarService.has_write_permission(db, calendar_id, current_user.id)
+    has_permission = CalendarService.has_write_permission(db, calendar_id, current_user["username"])
     return {"has_write_permission": has_permission}
 
 
@@ -351,13 +494,13 @@ async def check_write_permission(
 async def check_read_permission(
     calendar_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Check if the current user has at least read permission on the specified calendar.
     Returns True if user can read from the calendar.
     """
-    has_permission = CalendarService.has_read_permission(db, calendar_id, current_user.id)
+    has_permission = CalendarService.has_read_permission(db, calendar_id, current_user["username"])
     return {"has_read_permission": has_permission}
 
 
@@ -369,12 +512,12 @@ async def create_share(
     calendar_id: int,
     share: CalendarShareCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Share calendar with another user. User must be owner or admin.
     """
-    db_share = CalendarService.create_share(db, calendar_id, share, current_user.id)
+    db_share = CalendarService.create_share(db, calendar_id, share, current_user["username"])
     if not db_share:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -387,7 +530,7 @@ async def create_share(
 async def read_shares(
     calendar_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Get all shares for a calendar. User must be owner or admin.
@@ -399,7 +542,7 @@ async def read_shares(
             detail="Calendar not found"
         )
     
-    if current_user.role != "admin" and current_user.id != calendar.owner_id:
+    if current_user["role"] != "admin" and current_user["username"] != calendar.owner_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No permission to view shares"
@@ -414,12 +557,12 @@ async def update_share(
     user_id: int,
     permission: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Update share permission. User must be owner or admin.
     """
-    db_share = CalendarService.update_share(db, calendar_id, user_id, permission, current_user.id)
+    db_share = CalendarService.update_share(db, calendar_id, user_id, permission, current_user["username"])
     if not db_share:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -433,12 +576,12 @@ async def delete_share(
     calendar_id: int,
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_active_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Remove share. User must be owner or admin.
     """
-    success = CalendarService.delete_share(db, calendar_id, user_id, current_user.id)
+    success = CalendarService.delete_share(db, calendar_id, user_id, current_user["username"])
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

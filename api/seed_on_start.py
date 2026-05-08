@@ -1,46 +1,23 @@
 #!/usr/bin/env python3
 """
 Seed script that runs when the container starts.
-Creates admin user if not exists and ensures database tables exist.
+Creates database tables and ensures admin user settings exist.
+
+Note: Users are managed exclusively in Radicale. This script only:
+1. Creates database tables
+2. Creates initial user_settings for common users
+
+Users themselves must be created in Radicale.
 """
 import os
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
-# Import after path is set
 import sys
 sys.path.insert(0, '/app')
 
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
 from src.database.database import Base
-from src.models import User, UserSettings
-from src.services.auth import AuthService
-
-
-def run_migrations(engine):
-    """Run any pending database migrations."""
-    from sqlalchemy import text
-    
-    with engine.connect() as conn:
-        # Check if columns exist and add them if not
-        result = conn.execute(text("PRAGMA table_info(calendars)")).fetchall()
-        column_names = [col[1] for col in result]
-        
-        print(f"Checking calendars table columns: {column_names}")
-        
-        # Add missing columns
-        if 'system_username' not in column_names:
-            conn.execute(text("ALTER TABLE calendars ADD COLUMN system_username VARCHAR"))
-            print("✓ Added system_username column")
-        
-        if 'system_password' not in column_names:
-            conn.execute(text("ALTER TABLE calendars ADD COLUMN system_password VARCHAR"))
-            print("✓ Added system_password column")
-        
-        if 'is_shared_calendar' not in column_names:
-            conn.execute(text("ALTER TABLE calendars ADD COLUMN is_shared_calendar BOOLEAN DEFAULT 0"))
-            print("✓ Added is_shared_calendar column")
-        
-        conn.commit()
+from src.models import UserSettings
 
 
 def main():
@@ -50,45 +27,35 @@ def main():
     # Create engine
     engine = create_engine(database_url, connect_args={"check_same_thread": False})
     
-    # Run migrations first
-    run_migrations(engine)
-    
     # Create all tables
     Base.metadata.create_all(bind=engine)
+    print("✓ Database tables created")
     
     # Create session
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = SessionLocal()
     
     try:
-        # Check if admin exists
-        admin = db.query(User).filter(User.username == "admin").first()
+        # List of users that should have settings pre-created
+        # These users must exist in Radicale
+        users_to_seed = ['admin', 'testuser', 'user1', 'user2', 'user3']
         
-        if not admin:
-            # Create admin user
-            admin = User(
-                username="admin",
-                password_hash=AuthService.hash_password("admin"),
-                role="admin"
-            )
-            db.add(admin)
+        for username in users_to_seed:
+            settings = db.query(UserSettings).filter_by(radicale_username=username).first()
+            if not settings:
+                settings = UserSettings(radicale_username=username)
+                db.add(settings)
+                print(f"✓ Created user settings for: {username}")
+        
+        if users_to_seed:
             db.commit()
-            db.refresh(admin)
-            
-            # Create admin settings
-            settings = UserSettings(user_id=admin.id)
-            db.add(settings)
-            db.commit()
-            
-            print(f"✓ Created admin user with ID: {admin.id}")
-            print(f"✓ Database seeded successfully")
-        else:
-            print(f"✓ Admin user already exists (ID: {admin.id})")
+            print(f"✓ Database seeded successfully with {len(users_to_seed)} user settings")
         
     except Exception as e:
         print(f"✗ Error seeding database: {e}")
         import traceback
         traceback.print_exc()
+        db.rollback()
     finally:
         db.close()
 

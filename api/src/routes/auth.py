@@ -4,9 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Annotated
 
 from ..database import get_db
-from ..models import User
 from ..schemas.auth import Token, TokenData, LoginResponse
-from ..schemas.users import UserInDB
 from ..services.auth import AuthService
 from ..services.users import UserService
 
@@ -21,42 +19,45 @@ async def login(
     db: Session = Depends(get_db)
 ):
     """
-    Authenticate user and return JWT token.
-    If must_change_password is True, returns a flag indicating password change is required.
+    Authenticate user against Radicale and return JWT token.
     
-    Use Basic Auth with username and password.
+    Uses Basic Auth with username and password.
+    Authentication is done directly against Radicale, not the database.
+    
+    The must_change_password flag comes from the user_settings.otp field.
     """
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"Login attempt for user: {credentials.username}")
     
-    user = UserService.get_user_by_username(db, credentials.username)
+    username = credentials.username
+    password = credentials.password
     
-    if not user:
-        logger.warning(f"User not found: {credentials.username}")
+    # Authenticate directly with Radicale
+    success, role = AuthService.authenticate_with_radicale(username, password)
+    
+    if not success or not role:
+        logger.warning(f"Invalid credentials for user: {username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
     
-    logger.info(f"User found: {user.username}, role: {user.role}, must_change_pw: {user.must_change_password}")
+    logger.info(f"User authenticated: {username}, role: {role}")
     
-    if not AuthService.verify_password(credentials.password, user.password_hash):
-        logger.warning(f"Invalid password for user: {credentials.username}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Basic"},
-        )
+    # Check if user must change password (OTP flag in user_settings)
+    must_change_password = UserService.get_otp_flag(db, username)
+    logger.info(f"User {username} must_change_password: {must_change_password}")
     
-    access_token = AuthService.create_token(user.id, user.username, user.role)
-    logger.info(f"Login successful for user: {user.username}")
+    # Create JWT token
+    access_token = AuthService.create_token(username, role)
+    logger.info(f"Login successful for user: {username}")
     
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        must_change_password=user.must_change_password
+        must_change_password=must_change_password
     )
 
 
@@ -67,5 +68,10 @@ async def get_token(
 ):
     """
     Alternative endpoint to get JWT token via Basic Auth.
+    Same as /login but returns just the token.
     """
-    return await login(credentials, db)
+    login_response = await login(credentials, db)
+    return Token(
+        access_token=login_response.access_token,
+        token_type=login_response.token_type
+    )

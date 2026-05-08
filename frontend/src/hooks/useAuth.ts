@@ -2,10 +2,9 @@ import { useState, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/services/api';
 import { jwtDecode } from '@/utils';
-import type { User, LoginCredentials } from '@/types';
+import type { User, LoginCredentials, AuthState } from '@/types';
 
 interface TokenPayload {
-  sub: number;
   username: string;
   role: string;
   exp: number;
@@ -30,6 +29,26 @@ interface UseAuthReturn {
   clearMustChangePassword: () => void;
 }
 
+// Helper to decode JWT token and extract user info
+function decodeToken(token: string): TokenPayload | null {
+  try {
+    const payload = jwtDecode<TokenPayload>(token);
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+// Helper to create User object from token payload
+function createUserFromPayload(payload: TokenPayload | null, mustChangePassword: boolean = false): User | null {
+  if (!payload) return null;
+  return {
+    username: payload.username,
+    role: payload.role as 'admin' | 'user',
+    must_change_password: mustChangePassword,
+  };
+}
+
 export function useAuth(): UseAuthReturn {
   const [error, setError] = useState<Error | null>(null);
   const [userState, setUserState] = useState<User | null>(null);
@@ -48,18 +67,18 @@ export function useAuth(): UseAuthReturn {
     
     if (token) {
       try {
-        const decoded = jwtDecode<TokenPayload>(token);
-        const user: User = {
-          id: decoded.sub,
-          username: decoded.username,
-          role: decoded.role as 'admin' | 'user',
-          must_change_password: mustChangePw,
-          created_at: '',
-          updated_at: '',
-        };
-        localStorage.setItem('user', JSON.stringify(user));
-        setUserState(user);
-        setError(null);
+        const payload = decodeToken(token);
+        const user = createUserFromPayload(payload, mustChangePw);
+        if (user) {
+          localStorage.setItem('user', JSON.stringify(user));
+          setUserState(user);
+          setError(null);
+        } else {
+          // Clear invalid token
+          localStorage.removeItem('token');
+          localStorage.removeItem('user');
+          localStorage.removeItem('must_change_password');
+        }
       } catch {
         // Token invalid, try to use cached user if available
         if (userStr) {
@@ -97,23 +116,20 @@ export function useAuth(): UseAuthReturn {
       
       // Decode token to get user info
       try {
-        const decoded = jwtDecode<TokenPayload>(access_token);
-        const user: User = {
-          id: decoded.sub,
-          username: decoded.username,
-          role: decoded.role as 'admin' | 'user',
-          must_change_password: must_change_password,
-          created_at: '',
-          updated_at: '',
-        };
-        localStorage.setItem('user', JSON.stringify(user));
-        setUserState(user);
-        setError(null);
-        
-        // Invalidate queries and refetch data
-        queryClient.invalidateQueries({ queryKey: ['auth'] });
-        queryClient.invalidateQueries({ queryKey: ['calendars'] });
-        queryClient.invalidateQueries({ queryKey: ['events'] });
+        const payload = decodeToken(access_token);
+        const user = createUserFromPayload(payload, must_change_password);
+        if (user) {
+          localStorage.setItem('user', JSON.stringify(user));
+          setUserState(user);
+          setError(null);
+          
+          // Invalidate queries and refetch data
+          queryClient.invalidateQueries({ queryKey: ['auth'] });
+          queryClient.invalidateQueries({ queryKey: ['calendars'] });
+          queryClient.invalidateQueries({ queryKey: ['events'] });
+        } else {
+          throw new Error('Invalid token received');
+        }
       } catch (err) {
         setError(new Error('Invalid token received'));
         throw err;
@@ -219,5 +235,3 @@ export function useAuth(): UseAuthReturn {
     clearMustChangePassword,
   };
 }
-
-

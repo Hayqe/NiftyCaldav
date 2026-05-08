@@ -4,60 +4,28 @@ from datetime import datetime
 
 
 class CalendarBase(BaseModel):
+    """Base calendar fields."""
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     color: Optional[str] = "blue"
 
 
 class CalendarCreate(CalendarBase):
+    """Create a new calendar."""
     pass
 
 
 class CalendarUpdate(CalendarBase):
+    """Update calendar."""
     pass
-
-
-class CalendarInDB(CalendarBase):
-    id: int
-    owner_id: int
-    created_at: datetime
-    updated_at: datetime
-    # Optional fields for shared calendars
-    system_username: Optional[str] = None
-    system_password: Optional[str] = None
-    is_shared_calendar: bool = False
-
-    class Config:
-        from_attributes = True
-
-
-class CalendarShareBase(BaseModel):
-    user_id: int
-    permission: str = Field(..., pattern="^(read|write|admin)$")
-
-
-class CalendarShareCreate(CalendarShareBase):
-    pass
-
-
-class CalendarShareInDB(CalendarShareBase):
-    calendar_id: int
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class CalendarWithShares(CalendarInDB):
-    shares: List[CalendarShareInDB] = []
 
 
 # Radicale-only calendar schema with virtual ID for frontend compatibility
 class CalendarRadicale(CalendarBase):
+    """Calendar from Radicale with virtual ID."""
     id: int  # Virtual ID generated from URL hash
     url: str
-    owner_id: int = 1  # Default, will be set based on owner_username
-    owner_username: Optional[str] = None  # Extracted from URL
+    owner_username: Optional[str] = None  # Extracted from Radicale URL
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -66,24 +34,78 @@ class CalendarRadicale(CalendarBase):
 
 
 class CalendarRadicaleWithShares(CalendarRadicale):
-    shares: List[CalendarShareInDB] = []
+    """Calendar from Radicale with shares list."""
+    shares: List[dict] = []  # Will contain share info
 
 
-# Calendar with full sharing info
+# Shared Calendar schemas (stored in DB)
+class SharedCalendarBase(BaseModel):
+    """Base shared calendar fields."""
+    name: str = Field(..., min_length=1, max_length=255)
+    description: Optional[str] = None
+    color: Optional[str] = "blue"
+
+
+class SharedCalendarCreate(SharedCalendarBase):
+    """Create a new shared calendar."""
+    pass
+
+
+class SharedCalendarInDB(SharedCalendarBase):
+    """Shared calendar from database."""
+    id: int
+    radicale_username: str  # Generated username for Radicale
+    password: str  # Generated password for Radicale
+    owner: str  # Radicale username of owner
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SharedCalendarWithShares(SharedCalendarInDB):
+    """Shared calendar with its shares."""
+    shares: List[dict] = []
+
+
+# Calendar Share schemas
+class CalendarShareBase(BaseModel):
+    """Base calendar share fields."""
+    # user is now a string (Radicale username), not an integer ID
+    user: str = Field(..., min_length=1)
+    rights: str = Field(..., pattern="^(RW|RO)$")  # RW or RO
+
+
+class CalendarShareCreate(CalendarShareBase):
+    """Create a new calendar share."""
+    pass
+
+
+class CalendarShareInDB(CalendarShareBase):
+    """Calendar share from database."""
+    id: int
+    shared_calendar_id: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# Calendar with sharing info (for frontend)
 class CalendarWithSharingInfo(BaseModel):
+    """Calendar with full sharing information."""
     id: int
     name: str
     description: Optional[str] = None
     color: Optional[str] = "blue"
-    owner_id: int
-    owner_username: Optional[str] = None
+    owner: str  # Radicale username of owner
+    radicale_username: Optional[str] = None  # For shared calendars
+    password: Optional[str] = None  # For shared calendars
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
-    # Sharing fields
-    system_username: Optional[str] = None
-    system_password: Optional[str] = None
     is_owner: bool = False
-    permission: str = "read"
+    permission: str = "RO"  # RW or RO
     is_shared: bool = False
 
     class Config:
