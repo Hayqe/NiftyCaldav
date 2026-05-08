@@ -1,42 +1,43 @@
 #!/usr/bin/env python3
-"""Seed admin user for NiftyCaldav."""
+"""Seed script for NiftyCaldav - creates initial user_settings for admin.
+
+Note: Users are managed exclusively in Radicale. This script only ensures
+that the admin user has settings in the database.
+"""
 import sys
 sys.path.insert(0, '/app')
 
 from src.database.database import SessionLocal, engine, Base
-from src.models import User, UserSettings
-from src.services.auth import AuthService
+from src.models import UserSettings
 
 def seed_admin():
-    """Create admin user if not exists."""
+    """Create admin user settings if not exists.
+    
+    Note: Admin user must exist in Radicale with username "admin".
+    This only creates the settings entry in the database.
+    """
     # Create tables first
     Base.metadata.create_all(bind=engine)
     
     db = SessionLocal()
     try:
-        # Check if admin exists
-        admin = db.query(User).filter(User.username == 'admin').first()
-        if not admin:
-            admin = User(
-                username='admin',
-                password_hash=AuthService.hash_password('admin'),
-                role='admin'
-            )
-            db.add(admin)
+        # Check if admin settings exist
+        admin_settings = db.query(UserSettings).filter_by(radicale_username='admin').first()
+        if not admin_settings:
+            admin_settings = UserSettings(radicale_username='admin')
+            db.add(admin_settings)
             db.commit()
-            db.refresh(admin)
+            db.refresh(admin_settings)
             
-            settings = UserSettings(user_id=admin.id)
-            db.add(settings)
-            db.commit()
-            
-            print(f'✓ Created admin user with ID: {admin.id}')
+            print(f'✓ Created admin user settings for: admin')
         else:
-            print(f'✓ Admin user already exists with ID: {admin.id}')
+            print(f'✓ Admin user settings already exist for: admin')
         
         return True
     except Exception as e:
         print(f'✗ Error: {e}')
+        import traceback
+        traceback.print_exc()
         return False
     finally:
         db.close()

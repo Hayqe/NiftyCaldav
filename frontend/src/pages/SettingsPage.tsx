@@ -1,99 +1,19 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Settings, Bell, Palette, User, ChevronLeft, Upload, Calendar, Trash2, Users, X, Plus, Edit2 } from 'lucide-react';
-import { useAuth, useSettings, useUpdateSettings, useMyCalendars, useSharedCalendars, useCalendarShares, useDeleteCalendar, useAddShare, useUpdateShare, useRemoveShare } from '@/hooks';
+import { Bell, Palette, User, ChevronLeft, Upload, Users, Settings, Plus, Check, Copy, RefreshCw } from 'lucide-react';
+import { useAuth, useMySettings, useUsers } from '@/hooks';
+import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
+import { usersApi } from '@/services/api';
 import { CALENDAR_COLORS, TIMEZONES, LANGUAGES } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
+import type { User as UserType, UserSettings, ApiResponse } from '@/types';
+
+type TabType = 'profile' | 'notifications' | 'appearance' | 'general' | 'users';
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState<'profile' | 'notifications' | 'appearance' | 'general' | 'calendars'>('profile');
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  
-  const { user, changePassword } = useAuth();
-  const { data: settingsData, isLoading: isLoadingSettings } = useSettings();
-  const { mutate: updateSettings, isPending: isUpdatingSettings } = useUpdateSettings();
-  const { data: myCalendarsData, isLoading: isLoadingMyCalendars } = useMyCalendars();
-  const { data: sharedCalendarsData, isLoading: isLoadingSharedCalendars } = useSharedCalendars();
-  const { mutate: deleteCalendar, isPending: isDeletingCalendar } = useDeleteCalendar();
-  const { mutate: addShare, isPending: isAddingShare } = useAddShare();
-  const { mutate: updateShare, isPending: isUpdatingShare } = useUpdateShare();
-  const { mutate: removeShare, isPending: isRemovingShare } = useRemoveShare();
-  
-  const myCalendars = myCalendarsData?.data || [];
-  const sharedCalendars = sharedCalendarsData?.data || [];
-  
+  const [activeTab, setActiveTab] = useState<TabType>('profile');
   const navigate = useNavigate();
-
-  const settings = settingsData?.data;
-
-  const [formData, setFormData] = useState({
-    timezone: settings?.timezone || 'Europe/Amsterdam',
-    language: settings?.language || 'nl',
-    notifications_enabled: settings?.notifications_enabled || false,
-    calendar_colors: settings?.calendar_colors || '{}',
-  });
-
-  // Update form data when settings load
-  useEffect(() => {
-    if (settings) {
-      setFormData({
-        timezone: settings.timezone || 'Europe/Amsterdam',
-        language: settings.language || 'nl',
-        notifications_enabled: settings.notifications_enabled || false,
-        calendar_colors: settings.calendar_colors || '{}',
-      });
-    }
-  }, [settings]);
-
-  const handleSaveSettings = async () => {
-    try {
-      await updateSettings(formData);
-      setSuccess('Instellingen opgeslagen');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError('Fout bij opslaan instellingen');
-      setTimeout(() => setError(null), 3000);
-    }
-  };
-
-  const handleChangePassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setSuccess(null);
-    
-    if (newPassword !== confirmPassword) {
-      setError('Nieuwe wachtwoorden komen niet overeen');
-      return;
-    }
-    
-    if (newPassword.length < 8) {
-      setError('Wachtwoord moet minstens 8 tekens bevat');
-      return;
-    }
-
-    try {
-      await changePassword({ current_password: currentPassword, new_password: newPassword });
-      setSuccess('Wachtwoord gewijzigd');
-      setCurrentPassword('');
-      setNewPassword('');
-      setConfirmPassword('');
-      setTimeout(() => setSuccess(null), 3000);
-    } catch (err) {
-      setError('Huidige wachtwoord is onjuist of er is een fout opgetreden');
-    }
-  };
-
-  if (isLoadingSettings) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <LoadingSpinner size="lg" text="Instellingen laden..." />
-      </div>
-    );
-  }
+  const { user } = useAuth();
 
   return (
     <div className="space-y-6">
@@ -113,157 +33,557 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         {/* Sidebar Navigation */}
-        <div className="md:col-span-1">
-          <div className="bg-white rounded-xl border border-gray-200 p-4">
-            <nav className="space-y-2">
-              <button
-                onClick={() => setActiveTab('profile')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'profile' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-              >
-                <User className="w-5 h-5" />
-                <span>Profiel</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('notifications')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'notifications' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-              >
-                <Bell className="w-5 h-5" />
-                <span>Meldingen</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('appearance')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'appearance' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-              >
-                <Palette className="w-5 h-5" />
-                <span>Uiterlijk</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('general')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'general' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-              >
-                <Settings className="w-5 h-5" />
-                <span>Algemeen</span>
-              </button>
-              <button
-                onClick={() => setActiveTab('calendars')}
-                className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'calendars' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
-              >
-                <Calendar className="w-5 h-5" />
-                <span>Agenda's</span>
-              </button>
-            </nav>
-          </div>
-          
-          {/* ICS Import Option */}
-          <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
-            <button
-              onClick={() => navigate('/ics-import')}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-left text-gray-700"
-            >
-              <Upload className="w-5 h-5" />
-              <span>ICS Import</span>
-            </button>
-          </div>
-        </div>
+        <SettingsSidebar activeTab={activeTab} setActiveTab={setActiveTab} user={user} />
 
         {/* Main Content */}
         <div className="md:col-span-3">
-          {activeTab === 'profile' && (
-            <ProfileTab
-              user={user}
-              currentPassword={currentPassword}
-              newPassword={newPassword}
-              confirmPassword={confirmPassword}
-              setCurrentPassword={setCurrentPassword}
-              setNewPassword={setNewPassword}
-              setConfirmPassword={setConfirmPassword}
-              error={error}
-              success={success}
-              onSubmit={handleChangePassword}
-              isSubmitting={false}
-            />
-          )}
-          
-          {activeTab === 'notifications' && (
-            <NotificationsTab
-              formData={formData}
-              setFormData={setFormData}
-              onSave={handleSaveSettings}
-              isSaving={isUpdatingSettings}
-              success={success}
-            />
-          )}
-          
-          {activeTab === 'appearance' && (
-            <AppearanceTab
-              formData={formData}
-              setFormData={setFormData}
-              onSave={handleSaveSettings}
-              isSaving={isUpdatingSettings}
-            />
-          )}
-          
-          {activeTab === 'general' && (
-            <GeneralTab
-              formData={formData}
-              setFormData={setFormData}
-              onSave={handleSaveSettings}
-              isSaving={isUpdatingSettings}
-              timezoneOptions={TIMEZONES}
-              languageOptions={LANGUAGES}
-            />
-          )}
-          {activeTab === 'calendars' && (
-            <CalendarTab
-              myCalendars={myCalendars}
-              sharedCalendars={sharedCalendars}
-              onDeleteCalendar={deleteCalendar}
-              isDeletingCalendar={isDeletingCalendar}
-              onAddShare={addShare}
-              onUpdateShare={updateShare}
-              onRemoveShare={removeShare}
-              isAddingShare={isAddingShare}
-              isUpdatingShare={isUpdatingShare}
-              isRemovingShare={isRemovingShare}
-              isLoading={isLoadingMyCalendars || isLoadingSharedCalendars}
-            />
-          )}
+          <SettingsContent activeTab={activeTab} user={user} />
         </div>
       </div>
     </div>
   );
 }
 
-// Profile Tab
-interface ProfileTabProps {
-  user: any;
-  currentPassword: string;
-  newPassword: string;
-  confirmPassword: string;
-  setCurrentPassword: (v: string) => void;
-  setNewPassword: (v: string) => void;
-  setConfirmPassword: (v: string) => void;
-  error: string | null;
-  success: string | null;
-  onSubmit: (e: React.FormEvent) => Promise<void>;
-  isSubmitting: boolean;
+// Sidebar Navigation Component
+interface SettingsSidebarProps {
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
+  user: UserType | null;
 }
 
-function ProfileTab({
-  currentPassword,
-  newPassword,
-  confirmPassword,
-  setCurrentPassword,
-  setNewPassword,
-  setConfirmPassword,
-  error,
-  success,
-  onSubmit,
-  isSubmitting,
-}: ProfileTabProps) {
+function SettingsSidebar({ activeTab, setActiveTab, user }: SettingsSidebarProps) {
+  const navigate = useNavigate();
+
+  return (
+    <div className="md:col-span-1">
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <nav className="space-y-2">
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'profile' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+          >
+            <User className="w-5 h-5" />
+            <span>Profiel</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('notifications')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'notifications' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+          >
+            <Bell className="w-5 h-5" />
+            <span>Meldingen</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('appearance')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'appearance' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+          >
+            <Palette className="w-5 h-5" />
+            <span>Uiterlijk</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('general')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'general' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+          >
+            <Settings className="w-5 h-5" />
+            <span>Algemeen</span>
+          </button>
+          {user?.role === 'admin' && (
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'users' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+            >
+              <Users className="w-5 h-5" />
+              <span>Gebruikers</span>
+            </button>
+          )}
+        </nav>
+      </div>
+
+      {/* ICS Import Option */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4 mt-4">
+        <button
+          onClick={() => navigate('/ics-import')}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg hover:bg-gray-50 transition-colors text-left text-gray-700"
+        >
+          <Upload className="w-5 h-5" />
+          <span>ICS Import</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Main Content Component
+interface SettingsContentProps {
+  activeTab: TabType;
+  user: UserType | null;
+}
+
+function SettingsContent({ activeTab, user }: SettingsContentProps) {
+  const { changePassword } = useAuth();
+  const { data: settingsData, isLoading: isLoadingSettings, update } = useMySettings();
+  const settings = settingsData;
+
+  if (isLoadingSettings) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="lg" text="Instellingen laden..." />
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {activeTab === 'profile' && (
+        <ProfileTab
+          user={user}
+          changePassword={changePassword}
+        />
+      )}
+      {activeTab === 'notifications' && (
+        <NotificationsTab
+          settings={settings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
+        />
+      )}
+      {activeTab === 'appearance' && (
+        <AppearanceTab
+          settings={settings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
+        />
+      )}
+      {activeTab === 'general' && (
+        <GeneralTab
+          settings={settings}
+          updateSettings={update as (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>}
+          isUpdatingSettings={false}
+        />
+      )}
+      {activeTab === 'users' && user?.role === 'admin' && (
+        <UsersTab />
+      )}
+    </>
+  );
+}
+
+// Helper function for role badge
+function getUserRoleBadge(role: string) {
+  switch (role) {
+    case 'admin':
+      return <span className="badge bg-red-100 text-red-700">Admin</span>;
+    case 'user':
+      return <span className="badge bg-blue-100 text-blue-700">Gebruiker</span>;
+    default:
+      return <span className="badge bg-gray-100 text-gray-700">{role}</span>;
+  }
+}
+
+// Users Tab Component
+function UsersTab() {
+  const queryClient = useQueryClient();
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
+  
+  // Success notification state
+  const [successNotification, setSuccessNotification] = useState<{
+    username: string;
+    password: string;
+    message: string;
+  } | null>(null);
+
+  // Get list of users with settings
+  const { data: usersData, isLoading: isLoadingUsers, refetch: refetchUsers } = useUsers();
+
+  // Also fetch OTP status for each user
+  const { data: usersSettings } = useQuery({
+    queryKey: ['users-settings'],
+    queryFn: async () => {
+      if (!usersData || usersData.length === 0) return [];
+      const settingsPromises = usersData.map(user => 
+        usersApi.getSettings(user.username).then(res => res.data).catch(() => null)
+      );
+      return Promise.all(settingsPromises);
+    },
+    enabled: !!usersData && usersData.length > 0,
+  });
+
+  // Merge user data with OTP status
+  const users: UserType[] = (usersData || []).map((user, index) => ({
+    ...user,
+    must_change_password: usersSettings?.[index]?.otp || false
+  }));
+
+  // Create user mutation
+  const createUserMutation = useMutation({
+    mutationFn: (username: string) => usersApi.createUser(username),
+    onSuccess: (response) => {
+      setSuccessNotification({
+        username: response.data.username,
+        password: response.data.password,
+        message: response.data.message
+      });
+      // Refresh users list
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['users-settings'] });
+    },
+    onError: (err) => {
+      alert(`Fout bij aanmaken gebruiker: ${err instanceof Error ? err.message : 'Onbekende fout'}`);
+    }
+  });
+
+  // Reset password mutation
+  const resetPasswordMutation = useMutation({
+    mutationFn: (username: string) => usersApi.resetUserPassword(username),
+    onSuccess: (response) => {
+      setSuccessNotification({
+        username: response.data.username,
+        password: response.data.new_password,
+        message: response.data.message
+      });
+      // Refresh users settings to show OTP flag
+      queryClient.invalidateQueries({ queryKey: ['users-settings'] });
+    },
+    onError: (err) => {
+      alert(`Fout bij resetten wachtwoord: ${err instanceof Error ? err.message : 'Onbekende fout'}`);
+    }
+  });
+
+  const handleResetPassword = (username: string) => {
+    if (confirm(`Weet je zeker dat je het wachtwoord voor ${username} wilt resetten?`)) {
+      resetPasswordMutation.mutate(username);
+    }
+  };
+
+  if (isLoadingUsers) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="lg" text="Gebruikers laden..." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <div className="flex items-center justify-between mb-6">
+        <h2 className="text-lg font-semibold text-gray-900">Gebruikersbeheer</h2>
+        <button
+          onClick={() => setIsAddUserModalOpen(true)}
+          className="btn btn-primary p-2"
+        >
+          <Plus className="w-5 h-5" />
+        </button>
+      </div>
+      
+      {/* Success Notification */}
+      {successNotification && (
+        <SuccessNotification
+          username={successNotification.username}
+          password={successNotification.password}
+          message={successNotification.message}
+          onDismiss={() => setSuccessNotification(null)}
+        />
+      )}
+
+      {/* Users Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Gebruikersnaam
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Rol
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                Wachtwoord status
+              </th>
+              <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                Actie
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {users.length > 0 ? (
+              users.map(user => (
+                <tr key={user.username} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-gray-900">{user.username}</div>
+                  </td>
+                  <td className="px-4 py-3">{getUserRoleBadge(user.role)}</td>
+                  <td className="px-4 py-3">
+                    {user.must_change_password ? (
+                      <span className="badge bg-yellow-100 text-yellow-700">Moet wachtwoord wijzigen</span>
+                    ) : (
+                      <span className="badge bg-green-100 text-green-700">OK</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      onClick={() => handleResetPassword(user.username)}
+                      className="p-2 text-gray-400 hover:text-orange-500 hover:bg-orange-50 rounded-lg"
+                      title="Wachtwoord resetten"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={4} className="px-4 py-8 text-center text-gray-500">
+                  Geen gebruikers gevonden
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Add User Modal */}
+      <AddUserModal
+        isOpen={isAddUserModalOpen}
+        onClose={() => setIsAddUserModalOpen(false)}
+        onSuccess={(username, password) => {
+          setSuccessNotification({
+            username,
+            password,
+            message: `Gebruiker '${username}' is succesvol aangemaakt.`
+          });
+        }}
+      />
+    </div>
+  );
+}
+
+// Success Notification Component
+interface SuccessNotificationProps {
+  username: string;
+  password: string;
+  message: string;
+  onDismiss: () => void;
+}
+
+function SuccessNotification({ username, password, message, onDismiss }: SuccessNotificationProps) {
+  const [copied, setCopied] = useState(false);
+
+  // Auto-dismiss after 30 seconds
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 30000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(password);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <div className="fixed top-4 right-4 bg-orange-100 border-2 border-orange-400 rounded-xl p-4 shadow-lg z-50 max-w-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex-shrink-0">
+          <Check className="w-6 h-6 text-orange-600" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-bold text-orange-800 truncate">{message}</h3>
+          <p className="text-sm text-orange-700 mt-1">
+            Gebruikersnaam: <span className="font-mono font-semibold">{username}</span>
+          </p>
+          <div className="mt-2 p-2 bg-white rounded border border-orange-200">
+            <code className="text-sm font-mono break-all text-orange-800">{password}</code>
+          </div>
+          <button
+            onClick={copyToClipboard}
+            className="mt-2 flex items-center gap-1 text-sm text-orange-600 hover:text-orange-800 transition-colors"
+          >
+            {copied ? (
+              <>
+                <Check className="w-4 h-4" />
+                <span>Gekopieerd!</span>
+              </>
+            ) : (
+              <>
+                <Copy className="w-4 h-4" />
+                <span>Kopieer wachtwoord</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Add User Modal Component
+interface AddUserModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: (username: string, password: string) => void;
+}
+
+function AddUserModal({ isOpen, onClose, onSuccess }: AddUserModalProps) {
+  const [username, setUsername] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createMutation = useMutation({
+    mutationFn: (username: string) => usersApi.createUser(username),
+    onSuccess: (response) => {
+      onSuccess(response.data.username, response.data.password);
+      setUsername('');
+      setError(null);
+      onClose();
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Onbekende fout bij aanmaken gebruiker');
+      setIsCreating(false);
+    }
+  });
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    
+    if (!username.trim()) {
+      setError('Gebruikersnaam is verplicht');
+      return;
+    }
+    
+    if (username.toLowerCase() === 'admin') {
+      setError('Gebruikersnaam "admin" is gereserveerd');
+      return;
+    }
+    
+    setIsCreating(true);
+    createMutation.mutate(username);
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-900">Gebruiker toevoegen</h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-gray-100">
+            <span className="text-2xl text-gray-400">&times;</span>
+          </button>
+        </div>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Gebruikersnaam
+            </label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              placeholder="Voer gebruikersnaam in"
+              disabled={isCreating}
+            />
+          </div>
+
+          <div className="flex gap-2 justify-end pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="btn btn-secondary"
+              disabled={isCreating}
+            >
+              Annuleren
+            </button>
+            <button
+              type="submit"
+              className="btn btn-primary"
+              disabled={isCreating || !username.trim()}
+            >
+              {isCreating ? (
+                <>
+                  <LoadingSpinner size="sm" />
+                  <span>Aanmaken...</span>
+                </>
+              ) : (
+                'Gebruiker aanmaken'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Profile Tab Component
+interface ProfileTabProps {
+  user: any;
+  changePassword: (data: { current_password?: string; new_password: string }) => Promise<void>;
+}
+
+function ProfileTab({ user, changePassword }: ProfileTabProps) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+    
+    if (newPassword !== confirmPassword) {
+      setError('Nieuwe wachtwoorden komen niet overeen');
+      return;
+    }
+    
+    if (newPassword.length < 8) {
+      setError('Wachtwoord moet minstens 8 tekens bevatten');
+      return;
+    }
+
+    try {
+      await changePassword({ current_password: currentPassword, new_password: newPassword });
+      setSuccess('Wachtwoord gewijzigd');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError('Huidige wachtwoord is onjuist of er is een fout opgetreden');
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Wijzig wachtwoord</h2>
+      
+      <div className="bg-gray-50 rounded-lg p-4 mb-6">
+        <h3 className="font-medium text-gray-900 mb-2">Huidige gebruiker</h3>
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center">
+            <span className="text-primary-700 font-semibold text-xl">{user?.username?.charAt(0).toUpperCase()}</span>
+          </div>
+          <div>
+            <p className="font-medium text-gray-900">{user?.username}</p>
+            <p className="text-sm text-gray-500">{user?.role === 'admin' ? 'Administrator' : 'Gebruiker'}</p>
+          </div>
+        </div>
+      </div>
       
       {error && (
         <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
@@ -277,7 +597,7 @@ function ProfileTab({
         </div>
       )}
 
-      <form onSubmit={onSubmit} className="space-y-4 max-w-md">
+      <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Huidige wachtwoord
@@ -286,7 +606,7 @@ function ProfileTab({
             type="password"
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
-            className="input"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             placeholder="Huidige wachtwoord"
             required
           />
@@ -300,7 +620,7 @@ function ProfileTab({
             type="password"
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
-            className="input"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             placeholder="Nieuwe wachtwoord (min. 8 tekens)"
             required
             minLength={8}
@@ -315,7 +635,7 @@ function ProfileTab({
             type="password"
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
-            className="input"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
             placeholder="Bevestig nieuw wachtwoord"
             required
           />
@@ -323,39 +643,35 @@ function ProfileTab({
         
         <button
           type="submit"
-          disabled={isSubmitting || !currentPassword || !newPassword || !confirmPassword}
+          disabled={!currentPassword || !newPassword || !confirmPassword}
           className="btn btn-primary"
         >
-          {isSubmitting ? <LoadingSpinner size="sm" /> : 'Wijzigen'}
+          Wijzigen
         </button>
       </form>
     </div>
   );
 }
 
-// Notifications Tab
+// Notifications Tab Component
 interface NotificationsTabProps {
-  formData: any;
-  setFormData: (data: any) => void;
-  onSave: () => Promise<void>;
-  isSaving: boolean;
-  success: string | null;
+  settings: any;
+  updateSettings: (data: Partial<UserSettings>) => Promise<ApiResponse<UserSettings>>;
+  isUpdatingSettings: boolean;
 }
 
-function NotificationsTab({ formData, setFormData, onSave, isSaving, success }: NotificationsTabProps) {
-  const handleToggle = () => {
-    setFormData({ ...formData, notifications_enabled: !formData.notifications_enabled });
+function NotificationsTab({ settings, updateSettings }: NotificationsTabProps) {
+  const handleSave = async () => {
+    try {
+      await updateSettings({ notifications_enabled: !settings?.notifications_enabled });
+    } catch (err) {
+      // Error handling
+    }
   };
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Meldingen</h2>
-      
-      {success && (
-        <div className="bg-green-50 border border-green-200 text-green-600 px-4 py-3 rounded-lg text-sm mb-4">
-          {success}
-        </div>
-      )}
 
       <div className="space-y-6 max-w-md">
         <div className="flex items-center justify-between">
@@ -366,452 +682,20 @@ function NotificationsTab({ formData, setFormData, onSave, isSaving, success }: 
           <label className="relative inline-flex items-center cursor-pointer">
             <input
               type="checkbox"
-              checked={formData.notifications_enabled}
-              onChange={handleToggle}
+              checked={settings?.notifications_enabled || false}
+              onChange={handleSave}
               className="sr-only peer"
             />
             <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"></div>
           </label>
         </div>
-
-        <div className="pt-4">
-          <button
-            onClick={onSave}
-            disabled={isSaving}
-            className="btn btn-primary"
-          >
-            {isSaving ? <LoadingSpinner size="sm" /> : 'Opslaan'}
-          </button>
-        </div>
       </div>
     </div>
   );
 }
 
-// Calendar Tab
-import type { Calendar as CalendarType, CalendarShare as CalendarShareType } from '@/types';
-
-interface CalendarTabProps {
-  myCalendars: CalendarType[];
-  sharedCalendars: CalendarType[];
-  onDeleteCalendar: (id: number) => Promise<void>;
-  isDeletingCalendar: boolean;
-  onAddShare: (data: { calendarId: number; data: { user_id: number; permission: 'read' | 'write' | 'admin' } }) => Promise<void>;
-  onUpdateShare: (data: { calendarId: number; userId: number; data: { permission: 'read' | 'write' | 'admin' } }) => Promise<void>;
-  onRemoveShare: (data: { calendarId: number; userId: number }) => Promise<void>;
-  isAddingShare: boolean;
-  isUpdatingShare: boolean;
-  isRemovingShare: boolean;
-  isLoading: boolean;
-}
-
-function CalendarTab({
-  myCalendars,
-  sharedCalendars,
-  onDeleteCalendar,
-  isDeletingCalendar,
-  onAddShare,
-  onUpdateShare,
-  onRemoveShare,
-  isAddingShare,
-  isUpdatingShare,
-  isRemovingShare,
-  isLoading,
-}: CalendarTabProps) {
-  const [selectedCalendar, setSelectedCalendar] = useState<CalendarType | null>(null);
-  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [newShareUserId, setNewShareUserId] = useState('');
-  const [newSharePermission, setNewSharePermission] = useState<'read' | 'write' | 'admin'>('read');
-  const [shares, setShares] = useState<CalendarShareType[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [isLoadingUsers, setIsLoadingUsers] = useState(false);
-  
-  // Fetch users for sharing
-  useEffect(() => {
-    const fetchUsers = async () => {
-      try {
-        setIsLoadingUsers(true);
-        // Import usersApi dynamically to avoid circular dependency
-        const { usersApi } = await import('@/services/api');
-        const response = await usersApi.getAllSimple();
-        setUsers(response?.data || []);
-      } catch (error) {
-        console.error('Failed to fetch users:', error);
-      } finally {
-        setIsLoadingUsers(false);
-      }
-    };
-    fetchUsers();
-  }, []);
-  
-  // Fetch shares for selected calendar
-  useEffect(() => {
-    if (!selectedCalendar) {
-      setShares([]);
-      return;
-    }
-    
-    const fetchShares = async () => {
-      try {
-        const { sharesApi } = await import('@/services/api');
-        const response = await sharesApi.getCalendarShares(selectedCalendar.id);
-        setShares(response?.data || []);
-      } catch (error) {
-        console.error('Failed to fetch shares:', error);
-      }
-    };
-    
-    fetchShares();
-  }, [selectedCalendar]);
-  
-  const handleDeleteCalendar = async (calendarId: number) => {
-    if (window.confirm('Weet je zeker dat je deze agenda wilt verwijderen?')) {
-      await onDeleteCalendar(calendarId);
-    }
-  };
-  
-  const handleAddShare = async () => {
-    if (!selectedCalendar || !newShareUserId) return;
-    
-    try {
-      await onAddShare({
-        calendarId: selectedCalendar.id,
-        data: { user_id: parseInt(newShareUserId), permission: newSharePermission }
-      });
-      setNewShareUserId('');
-      setNewSharePermission('read');
-      // Refresh shares
-      const { sharesApi } = await import('@/services/api');
-      const response = await sharesApi.getCalendarShares(selectedCalendar.id);
-      setShares(response?.data || []);
-    } catch (error) {
-      console.error('Failed to add share:', error);
-    }
-  };
-  
-  const handleUpdateSharePermission = async (share: CalendarShareType, newPermission: 'read' | 'write' | 'admin') => {
-    if (!selectedCalendar) return;
-    
-    try {
-      await onUpdateShare({
-        calendarId: selectedCalendar.id,
-        userId: share.user_id,
-        data: { permission: newPermission }
-      });
-      // Refresh shares
-      const { sharesApi } = await import('@/services/api');
-      const response = await sharesApi.getCalendarShares(selectedCalendar.id);
-      setShares(response?.data || []);
-    } catch (error) {
-      console.error('Failed to update share:', error);
-    }
-  };
-  
-  const handleRemoveShare = async (share: CalendarShareType) => {
-    if (!selectedCalendar) return;
-    
-    if (window.confirm(`Weet je zeker dat je de toegang voor deze gebruiker wilt verwijderen?`)) {
-      try {
-        await onRemoveShare({
-          calendarId: selectedCalendar.id,
-          userId: share.user_id
-        });
-        // Refresh shares
-        const { sharesApi } = await import('@/services/api');
-        const response = await sharesApi.getCalendarShares(selectedCalendar.id);
-        setShares(response?.data || []);
-      } catch (error) {
-        console.error('Failed to remove share:', error);
-      }
-    }
-  };
-  
-  if (isLoading) {
-    return (
-      <div className="bg-white rounded-xl border border-gray-200 p-6">
-        <LoadingSpinner size="md" text="Agenda's laden..." />
-      </div>
-    );
-  }
-  
-  return (
-    <div className="bg-white rounded-xl border border-gray-200 p-6">
-      <h2 className="text-lg font-semibold text-gray-900 mb-6">Agenda's beheer</h2>
-      
-      <div className="space-y-6">
-        {/* My Calendars */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-medium text-gray-900">Mijn agenda's</h3>
-          </div>
-          
-          {myCalendars.length === 0 ? (
-            <p className="text-sm text-gray-500">Je hebt nog geen eigen agenda's.</p>
-          ) : (
-            <div className="space-y-3">
-              {myCalendars.map(calendar => (
-                <div
-                  key={calendar.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: calendar.color || '#3b82f6' }}
-                    />
-                    <span className="font-medium text-gray-900">{calendar.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedCalendar(calendar);
-                        setIsShareModalOpen(true);
-                      }}
-                      className="p-2 rounded-lg hover:bg-gray-200 transition-colors text-gray-600"
-                      title="Gebruikers delen"
-                    >
-                      <Users className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCalendar(calendar.id)}
-                      disabled={isDeletingCalendar}
-                      className="p-2 rounded-lg hover:bg-red-100 transition-colors text-red-600 disabled:opacity-50"
-                      title="Verwijderen"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        {/* Shared Calendars (owned by me) */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-medium text-gray-900">Mijn gedeelde agenda's</h3>
-          </div>
-          
-          {sharedCalendars.filter(cal => cal.is_owner).length === 0 ? (
-            <p className="text-sm text-gray-500">Je hebt nog geen agenda's gedeeld met anderen.</p>
-          ) : (
-            <div className="space-y-3">
-              {sharedCalendars.filter(cal => cal.is_owner).map(calendar => (
-                <div
-                  key={calendar.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: calendar.color || '#8b5cf6' }}
-                    />
-                    <span className="font-medium text-gray-900">{calendar.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setSelectedCalendar(calendar);
-                        setIsShareModalOpen(true);
-                      }}
-                      className="p-2 rounded-lg hover:bg-gray-200 transition-colors text-gray-600"
-                      title="Gebruikers beheer"
-                    >
-                      <Users className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCalendar(calendar.id)}
-                      disabled={isDeletingCalendar}
-                      className="p-2 rounded-lg hover:bg-red-100 transition-colors text-red-600 disabled:opacity-50"
-                      title="Verwijderen"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        
-        {/* Shared with me */}
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-medium text-gray-900">Met mij gedeeld</h3>
-          </div>
-          
-          {sharedCalendars.filter(cal => !cal.is_owner).length === 0 ? (
-            <p className="text-sm text-gray-500">Er zijn geen agenda's met jou gedeeld.</p>
-          ) : (
-            <div className="space-y-3">
-              {sharedCalendars.filter(cal => !cal.is_owner).map(calendar => (
-                <div
-                  key={calendar.id}
-                  className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: calendar.color || '#10b981' }}
-                    />
-                    <span className="font-medium text-gray-900">{calendar.name}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="px-2 py-1 bg-gray-200 rounded text-xs text-gray-700">
-                      {calendar.permission}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-      
-      {/* Share Modal */}
-      {isShareModalOpen && selectedCalendar && (
-        <div
-          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={() => setIsShareModalOpen(false)}
-        >
-          <div
-            className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">
-                Gebruikers beheer voor: {selectedCalendar.name}
-              </h3>
-              <button
-                onClick={() => setIsShareModalOpen(false)}
-                className="p-1 rounded-lg hover:bg-gray-100"
-              >
-                <X className="w-4 h-4 text-gray-500" />
-              </button>
-            </div>
-            
-            <div className="space-y-4">
-              {/* Current shares */}
-              <div>
-                <h4 className="font-medium text-gray-900 mb-2">Huidige toegang</h4>
-                {shares.length === 0 ? (
-                  <p className="text-sm text-gray-500">Geen gebruikers hebben toegang tot deze agenda.</p>
-                ) : (
-                  <div className="space-y-2">
-                    {shares.map(share => (
-                      <div
-                        key={share.user_id}
-                        className="flex items-center justify-between p-2 bg-gray-50 rounded-lg"
-                      >
-                        <div>
-                          <span className="font-medium text-gray-900">
-                            {share.user?.username || `Gebruiker #${share.user_id}`}
-                          </span>
-                          <span className="ml-2 px-2 py-1 bg-gray-200 rounded text-xs text-gray-700">
-                            {share.permission}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <select
-                            value={share.permission}
-                            onChange={(e) => handleUpdateSharePermission(
-                              share, 
-                              e.target.value as 'read' | 'write' | 'admin'
-                            )}
-                            disabled={isUpdatingShare}
-                            className="text-sm border border-gray-300 rounded px-2 py-1"
-                          >
-                            <option value="read">Lezen</option>
-                            <option value="write">Schrijven</option>
-                            <option value="admin">Beheer</option>
-                          </select>
-                          <button
-                            onClick={() => handleRemoveShare(share)}
-                            disabled={isRemovingShare}
-                            className="p-1.5 rounded-lg hover:bg-red-100 transition-colors text-red-600"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-              {/* Add new share */}
-              <div className="border-t border-gray-200 pt-4">
-                <h4 className="font-medium text-gray-900 mb-2">Voeg gebruiker toe</h4>
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Gebruiker
-                    </label>
-                    <select
-                      value={newShareUserId}
-                      onChange={(e) => setNewShareUserId(e.target.value)}
-                      disabled={isLoadingUsers || isAddingShare}
-                      className="input"
-                    >
-                      <option value="">Selecteer gebruiker</option>
-                      {users.map(user => (
-                        <option key={user.id} value={user.id}>
-                          {user.username}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Toestemming
-                    </label>
-                    <select
-                      value={newSharePermission}
-                      onChange={(e) => setNewSharePermission(e.target.value as 'read' | 'write' | 'admin')}
-                      disabled={isAddingShare}
-                      className="input"
-                    >
-                      <option value="read">Lezen</option>
-                      <option value="write">Schrijven</option>
-                      <option value="admin">Beheer</option>
-                    </select>
-                  </div>
-                  <button
-                    onClick={handleAddShare}
-                    disabled={!newShareUserId || isAddingShare}
-                    className="btn btn-primary w-full"
-                  >
-                    {isAddingShare ? <LoadingSpinner size="sm" /> : 'Toevoegen'}
-                  </button>
-                </div>
-              </div>
-              
-              <div className="flex gap-2 justify-end mt-4 pt-4 border-t border-gray-200">
-                <button
-                  onClick={() => setIsShareModalOpen(false)}
-                  className="btn btn-secondary"
-                >
-                  Sluiten
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// Appearance Tab
-interface AppearanceTabProps {
-  formData: any;
-  setFormData: (data: any) => void;
-  onSave: () => Promise<void>;
-  isSaving: boolean;
-}
-
-function AppearanceTab({ formData, setFormData, onSave, isSaving }: AppearanceTabProps) {
+// Appearance Tab Component
+function AppearanceTab({ settings }: NotificationsTabProps) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Uiterlijk</h2>
@@ -824,8 +708,7 @@ function AppearanceTab({ formData, setFormData, onSave, isSaving }: AppearanceTa
             {CALENDAR_COLORS.map(color => (
               <button
                 key={color.value}
-                onClick={() => setFormData({ ...formData, calendar_colors: color.value })}
-                className={`w-8 h-8 rounded-full transition-all ${formData.calendar_colors === color.value ? 'ring-2 ring-primary-500' : ''}`}
+                className={`w-8 h-8 rounded-full transition-all ${settings?.calendar_colors === color.value ? 'ring-2 ring-primary-500' : ''}`}
                 style={{ backgroundColor: color.hex }}
               />
             ))}
@@ -833,12 +716,8 @@ function AppearanceTab({ formData, setFormData, onSave, isSaving }: AppearanceTa
         </div>
 
         <div className="pt-4">
-          <button
-            onClick={onSave}
-            disabled={isSaving}
-            className="btn btn-primary"
-          >
-            {isSaving ? <LoadingSpinner size="sm" /> : 'Opslaan'}
+          <button className="btn btn-primary">
+            Opslaan
           </button>
         </div>
       </div>
@@ -846,28 +725,25 @@ function AppearanceTab({ formData, setFormData, onSave, isSaving }: AppearanceTa
   );
 }
 
-// General Tab
-interface GeneralTabProps {
-  formData: any;
-  setFormData: (data: any) => void;
-  onSave: () => Promise<void>;
-  isSaving: boolean;
-  timezoneOptions: { value: string; label: string }[];
-  languageOptions: { value: string; label: string }[];
-}
+// General Tab Component
+function GeneralTab({ settings, updateSettings }: NotificationsTabProps) {
+  const [formData, setFormData] = useState({
+    timezone: settings?.timezone || 'Europe/Amsterdam',
+    language: settings?.language || 'nl',
+  });
 
-function GeneralTab({
-  formData,
-  setFormData,
-  onSave,
-  isSaving,
-  timezoneOptions,
-  languageOptions,
-}: GeneralTabProps) {
+  const handleSave = async () => {
+    try {
+      await updateSettings(formData);
+    } catch (err) {
+      // Error
+    }
+  };
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-6">Algemeen</h2>
-      
+
       <div className="space-y-6 max-w-md">
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -876,9 +752,9 @@ function GeneralTab({
           <select
             value={formData.timezone}
             onChange={(e) => setFormData({ ...formData, timezone: e.target.value })}
-            className="input"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            {timezoneOptions.map(option => (
+            {TIMEZONES.map(option => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -893,9 +769,9 @@ function GeneralTab({
           <select
             value={formData.language}
             onChange={(e) => setFormData({ ...formData, language: e.target.value })}
-            className="input"
+            className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
           >
-            {languageOptions.map(option => (
+            {LANGUAGES.map(option => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
@@ -905,11 +781,10 @@ function GeneralTab({
 
         <div className="pt-4">
           <button
-            onClick={onSave}
-            disabled={isSaving}
+            onClick={handleSave}
             className="btn btn-primary"
           >
-            {isSaving ? <LoadingSpinner size="sm" /> : 'Opslaan'}
+            Opslaan
           </button>
         </div>
       </div>

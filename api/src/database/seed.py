@@ -1,17 +1,19 @@
 """
-Seed script to create initial admin user and database tables.
+Seed script to create initial database tables.
+
+Note: Users are now authenticated via Radicale, not stored in database.
+This script only creates the database tables and initial settings entries.
 """
 import os
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from .database import Base
-from ..models import User, UserSettings
-from ..services.auth import AuthService
+from ..models import UserSettings, SharedCalendar, CalendarShare
 
 
 def seed_database(database_url: str = None):
-    """Create tables and seed initial admin user."""
+    """Create tables and seed initial data."""
     if database_url is None:
         database_url = os.getenv("DATABASE_URL", "sqlite:///./mistral.db")
     
@@ -25,35 +27,32 @@ def seed_database(database_url: str = None):
     db = SessionLocal()
     
     try:
-        # Check if admin already exists
-        admin = db.query(User).filter(User.username == "admin").first()
+        # Create initial user settings for default users
+        # These are keyed by radicale_username
+        users_to_seed = ["admin", "testuser", "user1", "user2", "user3"]
         
-        if not admin:
-            # Create admin user
-            admin = User(
-                username="admin",
-                password_hash=AuthService.hash_password("admin"),
-                role="admin"
-            )
-            db.add(admin)
-            db.commit()
-            db.refresh(admin)
-            
-            # Create admin settings
-            settings = UserSettings(user_id=admin.id)
-            db.add(settings)
-            db.commit()
-            
-            print(f"✓ Created admin user with ID: {admin.id}")
-        else:
-            print(f"✓ Admin user already exists (ID: {admin.id})")
+        for username in users_to_seed:
+            settings = db.query(UserSettings).filter_by(radicale_username=username).first()
+            if not settings:
+                settings = UserSettings(radicale_username=username)
+                db.add(settings)
+                print(f"✓ Created settings for user: {username}")
         
-        # Count users and calendars
-        user_count = db.query(User).count()
-        calendar_count = db.query(User).count()
+        db.commit()
+        
+        # Count settings
+        settings_count = db.query(UserSettings).count()
+        shared_cal_count = db.query(SharedCalendar).count()
         
         print(f"✓ Database seeded successfully")
-        print(f"  - Users: {user_count}")
+        print(f"  - User Settings: {settings_count}")
+        print(f"  - Shared Calendars: {shared_cal_count}")
+        print(f"\nNote: Users are authenticated via Radicale. Ensure Radicale has users:")
+        print(f"  - admin:admin (admin role)")
+        print(f"  - testuser:testpass")
+        print(f"  - user1:user1")
+        print(f"  - user2:user2")
+        print(f"  - user3:user3")
         
     except Exception as e:
         print(f"✗ Error seeding database: {e}")

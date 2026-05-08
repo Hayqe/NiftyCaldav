@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { calendarsApi, sharesApi } from '@/services/api';
-import type { Calendar } from '@/types';
+import type { Calendar, CalendarShare } from '@/types';
 
+// Regular calendars (from Radicale)
 export function useMyCalendars() {
   return useQuery({
     queryKey: ['calendars', 'my'],
@@ -10,6 +11,7 @@ export function useMyCalendars() {
   });
 }
 
+// Shared calendars (from database)
 export function useSharedCalendars() {
   return useQuery({
     queryKey: ['calendars', 'shared'],
@@ -18,12 +20,30 @@ export function useSharedCalendars() {
   });
 }
 
-export function useMyAndSharedCalendars() {
+// Get a specific shared calendar by ID
+export function useSharedCalendar(id: number | null) {
   return useQuery({
-    queryKey: ['calendars', 'my-and-shared'],
-    queryFn: calendarsApi.getMyAndSharedCalendars,
+    queryKey: ['calendars', 'shared', id],
+    queryFn: () => calendarsApi.getSharedCalendarById(id!),
+    enabled: !!id,
     staleTime: 1000,
   });
+}
+
+// Combined: my calendars + shared calendars
+export function useAllCalendars() {
+  const myCalendars = useMyCalendars();
+  const sharedCalendars = useSharedCalendars();
+  
+  // Combine when both are loaded
+  const combined = {
+    ...myCalendars,
+    data: myCalendars.data && sharedCalendars.data 
+      ? [...myCalendars.data, ...sharedCalendars.data]
+      : myCalendars.data || sharedCalendars.data || [],
+  };
+  
+  return combined;
 }
 
 export function useCheckWritePermission(calendarId: number | null) {
@@ -44,7 +64,7 @@ export function useCheckReadPermission(calendarId: number | null) {
   });
 }
 
-export function useAllCalendars() {
+export function useAllRadicaleCalendars() {
   return useQuery({
     queryKey: ['calendars', 'all'],
     queryFn: calendarsApi.getAll,
@@ -61,6 +81,7 @@ export function useCalendar(id: number | null) {
   });
 }
 
+// Calendar shares (now using username instead of user_id)
 export function useCalendarShares(calendarId: number | null) {
   return useQuery({
     queryKey: ['calendars', calendarId, 'shares'],
@@ -88,6 +109,7 @@ export function useCreateSharedCalendar() {
     mutationFn: calendarsApi.createShared,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['calendars'] });
+      queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });
     },
   });
 }
@@ -116,11 +138,25 @@ export function useDeleteCalendar() {
   });
 }
 
+// Delete shared calendar
+export function useDeleteSharedCalendar() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: calendarsApi.deleteShared,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });
+      queryClient.invalidateQueries({ queryKey: ['calendars'] });
+    },
+  });
+}
+
+// Share operations (now using username instead of user_id)
 export function useAddShare() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ calendarId, data }: { calendarId: number; data: { user_id: number; permission: 'read' | 'write' | 'admin' } }) =>
+    mutationFn: ({ calendarId, data }: { calendarId: number; data: { user: string; rights: 'RW' | 'RO' } }) =>
       sharesApi.addShare(calendarId, data),
     onSuccess: (_, { calendarId }) => {
       queryClient.invalidateQueries({ queryKey: ['calendars', calendarId, 'shares'] });
@@ -133,8 +169,8 @@ export function useUpdateShare() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ calendarId, userId, data }: { calendarId: number; userId: number; data: { permission: 'read' | 'write' | 'admin' } }) =>
-      sharesApi.updateShare(calendarId, userId, data),
+    mutationFn: ({ calendarId, username, data }: { calendarId: number; username: string; data: { rights: 'RW' | 'RO' } }) =>
+      sharesApi.updateShare(calendarId, username, data),
     onSuccess: (_, { calendarId }) => {
       queryClient.invalidateQueries({ queryKey: ['calendars', calendarId, 'shares'] });
     },
@@ -145,8 +181,8 @@ export function useRemoveShare() {
   const queryClient = useQueryClient();
   
   return useMutation({
-    mutationFn: ({ calendarId, userId }: { calendarId: number; userId: number }) =>
-      sharesApi.removeShare(calendarId, userId),
+    mutationFn: ({ calendarId, username }: { calendarId: number; username: string }) =>
+      sharesApi.removeShare(calendarId, username),
     onSuccess: (_, { calendarId }) => {
       queryClient.invalidateQueries({ queryKey: ['calendars', calendarId, 'shares'] });
       queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });

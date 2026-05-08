@@ -1,14 +1,13 @@
 // User Types
+// Note: User no longer has id field since users are managed via Radicale
 export interface User {
-  id: number;
   username: string;
   role: 'admin' | 'user';
-  created_at: string;
-  updated_at: string;
+  must_change_password?: boolean;
 }
 
 export interface UserSettings {
-  user_id: number;
+  radicale_username?: string;  // Primary key: Radicale username
   calendar_colors?: string;
   notifications_enabled?: boolean;
   timezone?: string;
@@ -16,36 +15,35 @@ export interface UserSettings {
   default_view: string;
   highlight_weekend: boolean;
   weekend_color: string;
+  default_duration?: number;
+  default_calendar?: string | null;
+  show_week_numbers?: boolean;
+  otp?: boolean;  // One-time password flag
 }
 
 // Calendar Types
 export interface Calendar {
   id: number;
   name: string;
-  description: string | null;
-  owner_id: number;
-  owner?: User;
+  description?: string | null;
+  owner_username?: string;  // Owner's Radicale username (not ID)
   color?: string;
-  created_at: string;
-  updated_at: string;
+  url?: string;
+  // Fields for shared calendars
   generated_username?: string;
   generated_password?: string;
   radicale_url?: string;
-  system_username?: string;
-  system_password?: string;
-  is_shared_calendar?: boolean;
-  is_owner?: boolean;
-  permission?: 'read' | 'write' | 'admin';
   is_shared?: boolean;
+  is_owner?: boolean;
+  permission?: 'read' | 'write' | 'admin' | 'RW' | 'RO';
 }
 
 export interface CalendarShare {
-  calendar_id: number;
-  user_id: number;
-  permission: 'read' | 'write' | 'admin';
-  created_at: string;
-  calendar?: Calendar;
-  user?: User;
+  id?: number;
+  shared_calendar_id?: number;
+  user: string;  // Changed from user_id to user (Radicale username string)
+  rights: 'RW' | 'RO';  // Changed from permission to rights
+  created_at?: string;
 }
 
 export interface CalendarWithShares extends Calendar {
@@ -76,9 +74,10 @@ export interface Event {
   recurrence_rule: string | null; // RRULE
   location: string | null;
   color: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at?: string;
+  updated_at?: string;
   calendar?: Calendar;
+  calendar_name?: string;
 }
 
 // API Response Types

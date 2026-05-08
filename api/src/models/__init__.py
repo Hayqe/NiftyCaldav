@@ -1,4 +1,4 @@
-from .users import User, UserSettings
-from .calendars import Calendar, CalendarShare
+from .users import UserSettings
+from .calendars import SharedCalendar, CalendarShare
 
-__all__ = ["User", "UserSettings", "Calendar", "CalendarShare"]
+__all__ = ["UserSettings", "SharedCalendar", "CalendarShare"]

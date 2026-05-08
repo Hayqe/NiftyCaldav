@@ -7,6 +7,11 @@ class Token(BaseModel):
     token_type: str
 
 
+class LoginResponse(Token):
+    """Login response with must_change_password flag"""
+    must_change_password: bool = False
+
+
 class TokenData(BaseModel):
     username: Optional[str] = None
     user_id: Optional[int] = None

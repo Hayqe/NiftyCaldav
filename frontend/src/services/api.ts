@@ -46,7 +46,7 @@ export default api;
 
 // ==================== AUTH ====================
 export const authApi = {
-  login: (credentials: LoginCredentials): Promise<ApiResponse<{ access_token: string; token_type: string }>> => {
+  login: (credentials: LoginCredentials): Promise<ApiResponse<{ access_token: string; token_type: string; must_change_password: boolean }>> => {
     return api.post('/auth/login', {}, {
       auth: {
         username: credentials.username,
@@ -71,33 +71,86 @@ export const authApi = {
         return Promise.reject(new Error('No user data'));
       }
     }
-    return Promise.reject(new Error('Not authenticated'));
+    return api.get('/users/me').then(response => {
+      return { data: response.data, message: 'User from API' };
+    });
   },
 
-  changePassword: (_data: { current_password: string; new_password: string }): Promise<ApiResponse<null>> => {
-    return Promise.reject(new Error('Not implemented'));
+  changePassword: (data: { current_password?: string; new_password: string }): Promise<ApiResponse<{ message: string; must_change_password: boolean }>> => {
+    return api.post('/users/me/change-password', data);
   },
 };
 
 // ==================== USERS ====================
+export interface UserWithOTP extends User {
+  one_time_password?: string;
+}
+
+export interface PasswordChangeResponse {
+  message: string;
+  must_change_password: boolean;
+}
+
 export const usersApi = {
-  getAll: (page: number = 1, perPage: number = 20): Promise<PaginatedResponse<User>> =>
-    api.get('/users/', { params: { page, per_page: perPage } }),
+  // Note: User CRUD operations are no longer supported (users managed via Radicale)
+  // Only settings management remains
   
-  getAllSimple: (): Promise<ApiResponse<User[]>> =>
+  getAll: (): Promise<ApiResponse<User[]>> => {
+    console.warn('User listing via /users/ is deprecated. Use /users/all-simple.');
+    return Promise.reject(new Error('Use getAllSimple instead'));
+  },
+  
+  getAllSimple: (): Promise<ApiResponse<string[]>> =>
     api.get('/users/all-simple'),
   
-  getById: (id: number): Promise<ApiResponse<User>> =>
-    api.get(`/users/${id}`),
+  getById: (username: string): Promise<ApiResponse<any>> =>
+    // Changed from id to username
+    api.get(`/users/${username}`),
   
-  create: (user: Omit<User, 'id' | 'created_at' | 'updated_at'> & { password: string }): Promise<ApiResponse<User>> =>
-    api.post('/users/', user),
+  // User creation is now done via Radicale, not API
+  // These endpoints are removed or will return errors:
+  create: (user: any): Promise<ApiResponse<User>> => {
+    console.warn('User creation via API is deprecated. Create users in Radicale.');
+    return Promise.reject(new Error('User creation not supported via API'));
+  },
   
-  update: (id: number, user: Partial<Omit<User, 'id' | 'created_at' | 'updated_at'>>): Promise<ApiResponse<User>> =>
-    api.put(`/users/${id}`, user),
+  createWithOTP: (username: string, role: string = 'user'): Promise<ApiResponse<UserWithOTP>> => {
+    console.warn('User creation with OTP via API is deprecated. Create users in Radicale.');
+    return Promise.reject(new Error('User creation not supported via API'));
+  },
   
-  delete: (id: number): Promise<ApiResponse<null>> =>
-    api.delete(`/users/${id}`),
+  update: (username: string, user: any): Promise<ApiResponse<any>> => {
+    console.warn('User update via API is deprecated.');
+    return Promise.reject(new Error('User update not supported via API'));
+  },
+  
+  delete: (username: string): Promise<ApiResponse<null>> => {
+    console.warn('User deletion via API is deprecated. Delete users in Radicale.');
+    return Promise.reject(new Error('User deletion not supported via API'));
+  },
+  
+  resetPassword: (username: string): Promise<ApiResponse<UserWithOTP>> => {
+    console.warn('Password reset via API is deprecated. Reset passwords in Radicale.');
+    return Promise.reject(new Error('Password reset not supported via API'));
+  },
+  
+  changeUserPassword: (username: string, data: { new_password: string }): Promise<ApiResponse<PasswordChangeResponse>> =>
+    api.post(`/users/${username}/change-password`, data),
+  
+  // User creation (admin only)
+  createUser: (username: string, password?: string): Promise<ApiResponse<{username: string, password: string, otp: boolean, message: string}>> =>
+    api.post('/users/', { username, password }),
+  
+  // Reset user password (admin only)
+  resetUserPassword: (username: string): Promise<ApiResponse<{username: string, new_password: string, otp: boolean, message: string}>> =>
+    api.post(`/users/${username}/reset-password`),
+  
+  // Settings management (still supported)
+  getSettings: (username: string): Promise<ApiResponse<UserSettings>> =>
+    api.get(`/users/${username}/settings`),
+  
+  updateSettings: (username: string, settings: Partial<UserSettings>): Promise<ApiResponse<UserSettings>> =>
+    api.put(`/users/${username}/settings`, settings),
 };
 
 // ==================== CALENDARS ====================
@@ -111,11 +164,13 @@ export const calendarsApi = {
   getMyCalendars: (): Promise<ApiResponse<Calendar[]>> =>
     api.get('/calendars/'),
   
-  getSharedCalendars: (): Promise<ApiResponse<Calendar[]>> =>
+  // Get shared calendars (new endpoint)
+  getSharedCalendars: (): Promise<ApiResponse<any[]>> =>
     api.get('/calendars/shared'),
   
-  getMyAndSharedCalendars: (): Promise<ApiResponse<any[]>> =>
-    api.get('/calendars/my-and-shared'),
+  // Get shared calendar by ID
+  getSharedCalendarById: (id: number): Promise<ApiResponse<any>> =>
+    api.get(`/calendars/shared/${id}`),
   
   checkWritePermission: (calendarId: number): Promise<ApiResponse<{ has_write_permission: boolean }>> =>
     api.get(`/calendars/${calendarId}/check-write-permission`),
@@ -126,7 +181,8 @@ export const calendarsApi = {
   create: (calendar: Omit<Calendar, 'id' | 'created_at' | 'updated_at'>): Promise<ApiResponse<Calendar>> =>
     api.post('/calendars/', calendar),
   
-  createShared: (calendar: Omit<Calendar, 'id' | 'created_at' | 'updated_at' | 'generated_username' | 'generated_password' | 'radicale_url'>): Promise<ApiResponse<CreateSharedCalendarResult>> =>
+  // Create shared calendar (returns shared calendar with generated credentials)
+  createShared: (calendar: Omit<Calendar, 'id' | 'created_at' | 'updated_at' | 'generated_username' | 'generated_password' | 'radicale_url' | 'system_username' | 'system_password'>): Promise<ApiResponse<CreateSharedCalendarResult>> =>
     api.post('/calendars/create-shared', calendar),
   
   update: (id: number, data: Partial<Omit<Calendar, 'id' | 'created_at' | 'updated_at'>>): Promise<ApiResponse<Calendar>> =>
@@ -134,21 +190,27 @@ export const calendarsApi = {
   
   delete: (id: number): Promise<ApiResponse<null>> =>
     api.delete(`/calendars/${id}`),
+  
+  // Delete shared calendar
+  deleteShared: (id: number): Promise<ApiResponse<null>> =>
+    api.delete(`/calendars/shared/${id}`),
 };
 
 // ==================== CALENDAR SHARES ====================
 export const sharesApi = {
+  // Note: share endpoints now use username (string) instead of user_id (number)
+  
   getCalendarShares: (calendarId: number): Promise<ApiResponse<CalendarShare[]>> =>
-    api.get(`/calendars/${calendarId}/shares/`),
+    api.get(`/calendars/shared/${calendarId}/shares/`),
   
-  addShare: (calendarId: number, data: { user_id: number; permission: 'read' | 'write' | 'admin' }): Promise<ApiResponse<CalendarShare>> =>
-    api.post(`/calendars/${calendarId}/shares/`, data),
+  addShare: (calendarId: number, data: { user: string; rights: 'RW' | 'RO' }): Promise<ApiResponse<CalendarShare>> =>
+    api.post(`/calendars/shared/${calendarId}/shares/`, data),
   
-  updateShare: (calendarId: number, userId: number, data: { permission: 'read' | 'write' | 'admin' }): Promise<ApiResponse<CalendarShare>> =>
-    api.put(`/calendars/${calendarId}/shares/${userId}/`, data),
+  updateShare: (calendarId: number, username: string, data: { rights: 'RW' | 'RO' }): Promise<ApiResponse<CalendarShare>> =>
+    api.put(`/calendars/shared/${calendarId}/shares/${username}/`, data),
   
-  removeShare: (calendarId: number, userId: number): Promise<ApiResponse<null>> =>
-    api.delete(`/calendars/${calendarId}/shares/${userId}/`),
+  removeShare: (calendarId: number, username: string): Promise<ApiResponse<null>> =>
+    api.delete(`/calendars/shared/${calendarId}/shares/${username}/`),
 };
 
 // ==================== EVENTS ====================

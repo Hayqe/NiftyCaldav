@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeft, ChevronRight, Plus, Users, Settings, LogOut, X, Eye, EyeOff } from 'lucide-react';
 import { useAuth, useCreateCalendar, useCreateSharedCalendar } from '@/hooks';
 import { useCalendarContext } from '@/context/CalendarContext';
@@ -6,7 +7,6 @@ import { cn, CALENDAR_COLORS } from '@/utils';
 import type { Calendar } from '@/types';
 import Logo from './Logo';
 import LoadingSpinner from './LoadingSpinner';
-import SettingsModal from './SettingsModal';
 import CreateSharedCalendarModal from './CreateSharedCalendarModal';
 
 interface SidebarProps {
@@ -15,9 +15,9 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
+  const navigate = useNavigate();
   const [isCreatingCalendar, setIsCreatingCalendar] = useState(false);
   const [isCreatingSharedCalendar, setIsCreatingSharedCalendar] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [newCalendarName, setNewCalendarName] = useState('');
   const [newCalendarColor, setNewCalendarColor] = useState('blue');
   const [newSharedCalendarName, setNewSharedCalendarName] = useState('');
@@ -214,7 +214,7 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
 
         <div className="p-4 border-t border-gray-800 space-y-1">
           <button
-            onClick={() => setIsSettingsOpen(true)}
+            onClick={() => navigate('/settings')}
             className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors text-sm text-gray-300"
           >
             <Settings className="w-4 h-4" />
@@ -262,8 +262,6 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
         </div>
       )}
 
-      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
-      
       <CreateSharedCalendarModal
         isOpen={isCreatingSharedCalendar}
         onClose={() => setIsCreatingSharedCalendar(false)}
