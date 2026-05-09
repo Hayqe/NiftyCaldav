@@ -35,7 +35,7 @@ export interface Calendar {
   radicale_url?: string;
   is_shared?: boolean;
   is_owner?: boolean;
-  permission?: 'read' | 'write' | 'admin' | 'RW' | 'RO';
+  permission?: 'RW' | 'RO';
 }
 
 export interface CalendarShare {

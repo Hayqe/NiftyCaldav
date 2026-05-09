@@ -103,6 +103,9 @@ export const usersApi = {
   getAllSimple: (): Promise<ApiResponse<string[]>> =>
     api.get('/users/all-simple'),
   
+  syncWithRadicale: (): Promise<ApiResponse<{ message: string; deleted_count: number; radicale_users_count: number; user_settings_count: number }>> =>
+    api.post('/users/sync'),
+  
   getById: (username: string): Promise<ApiResponse<any>> =>
     // Changed from id to username
     api.get(`/users/${username}`),
@@ -168,6 +171,10 @@ export const calendarsApi = {
   getSharedCalendars: (): Promise<ApiResponse<any[]>> =>
     api.get('/calendars/shared'),
   
+  // Get shared calendars owned by current user
+  getMySharedCalendars: (): Promise<ApiResponse<any[]>> =>
+    api.get('/calendars/shared/my'),
+  
   // Get shared calendar by ID
   getSharedCalendarById: (id: number): Promise<ApiResponse<any>> =>
     api.get(`/calendars/shared/${id}`),
@@ -201,16 +208,16 @@ export const sharesApi = {
   // Note: share endpoints now use username (string) instead of user_id (number)
   
   getCalendarShares: (calendarId: number): Promise<ApiResponse<CalendarShare[]>> =>
-    api.get(`/calendars/shared/${calendarId}/shares/`),
+    api.get(`/calendars/shared/${calendarId}/shares`),
   
   addShare: (calendarId: number, data: { user: string; rights: 'RW' | 'RO' }): Promise<ApiResponse<CalendarShare>> =>
-    api.post(`/calendars/shared/${calendarId}/shares/`, data),
+    api.post(`/calendars/shared/${calendarId}/shares`, data),
   
   updateShare: (calendarId: number, username: string, data: { rights: 'RW' | 'RO' }): Promise<ApiResponse<CalendarShare>> =>
-    api.put(`/calendars/shared/${calendarId}/shares/${username}/`, data),
+    api.put(`/calendars/shared/${calendarId}/shares/${username}`, data),
   
   removeShare: (calendarId: number, username: string): Promise<ApiResponse<null>> =>
-    api.delete(`/calendars/shared/${calendarId}/shares/${username}/`),
+    api.delete(`/calendars/shared/${calendarId}/shares/${username}`),
 };
 
 // ==================== EVENTS ====================

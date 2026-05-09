@@ -4,14 +4,13 @@ services:
     container_name: radicale
     restart: unless-stopped
     volumes:
-      - ./radicale-data:/var/www/radicale/data
-      - ./radicale-config:/var/www/radicale/config
+      - ./radicale-data:/data
     ports:
       - "5232:5232"
     environment:
-      - RADICALE_AUTH_TYPE=htpasswd
-      - RADICALE_HTPASSWD_FILENAME=/var/www/radicale/config/users
-      - RADICALE_HTPASSWD_ENCRYPTION=bcrypt
+      - RADICALE_CONFIG_AUTH_TYPE=htpasswd
+      - RADICALE_CONFIG_AUTH_HTPASSWD_FILENAME=/data/users
+      - RADICALE_CONFIG_AUTH_HTPASSWD_ENCRYPTION=bcrypt
 
   api:
     build: ./api
@@ -21,6 +20,7 @@ services:
       - "8880:8000"
     volumes:
       - ./api-data:/data
+      - ./radicale-data:/radicale-data # to add/modify users from UI
     depends_on:
       - radicale
     environment:

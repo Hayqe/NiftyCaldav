@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from .caldav_client import CalDAVClient
+from .auth import AuthService
 from ..schemas.events import EventCreate, EventUpdate, EventInDB
 
 
@@ -22,10 +23,16 @@ class EventService:
     @staticmethod
     def _get_caldav_client(username: str) -> Optional[CalDAVClient]:
         """Get authenticated CalDAV client for username."""
+        from .auth import AuthService
+        
+        # Get password from cache (stored at login time)
+        password = AuthService.get_password_for_user(username)
+        
+        if not password:
+            password = "admin"  # Fallback for demo
+        
         client = CalDAVClient()
-        # Connect with username and default password
-        # In production, password should come from user input or secure storage
-        if client.connect(username, "admin"):  # Using admin for demo
+        if client.connect(username, password):
             return client
         return None
     
@@ -41,10 +48,27 @@ class EventService:
         Returns (calendar_path, calendar_name).
         """
         import hashlib
+        from ..models import SharedCalendar
         
-        # For now, we only use virtual IDs (hash from URL)
+        # First check if this is a shared calendar
+        shared_calendar = db.query(SharedCalendar).filter(SharedCalendar.id == calendar_id).first()
+        if shared_calendar:
+            # For shared calendars, we need to connect with the generated credentials
+            if client.connect(shared_calendar.radicale_username, shared_calendar.password):
+                raw_calendars = client.get_calendars()
+                for cal_info in raw_calendars:
+                    cal_name = cal_info.get('name')
+                    # For shared calendars, the calendar name in Radicale matches our shared calendar name
+                    if cal_name == shared_calendar.name:
+                        return f"{shared_calendar.radicale_username}/{cal_name}", cal_name
+            return None, None
+        
+        # For personal calendars, use virtual IDs (hash from URL)
         # Get all calendars from Radicale and check hashes
-        if not client.connect(username, "admin"):
+        password = AuthService.get_password_for_user(username)
+        if not password:
+            password = "admin"
+        if not client.connect(username, password):
             return None, None
             
         raw_calendars = client.get_calendars()
@@ -60,6 +84,40 @@ class EventService:
         return None, None
     
     @staticmethod
+    def _get_caldav_client_for_calendar(db: Session, username: str, calendar_id: int) -> Tuple[Optional[CalDAVClient], Optional[str], Optional[str]]:
+        """
+        Get a CalDAV client connected to the appropriate calendar.
+        For shared calendars, connects with the shared calendar's credentials.
+        For personal calendars, connects with the user's credentials.
+        Returns (client, calendar_path, calendar_name).
+        """
+        from ..models import SharedCalendar
+        
+        # Check if this is a shared calendar
+        shared_calendar = db.query(SharedCalendar).filter(SharedCalendar.id == calendar_id).first()
+        if shared_calendar:
+            client = CalDAVClient()
+            if client.connect(shared_calendar.radicale_username, shared_calendar.password):
+                raw_calendars = client.get_calendars()
+                for cal_info in raw_calendars:
+                    cal_name = cal_info.get('name')
+                    if cal_name == shared_calendar.name:
+                        calendar_path = f"{shared_calendar.radicale_username}/{cal_name}"
+                        return client, calendar_path, cal_name
+            return None, None, None
+        
+        # For personal calendars
+        client = EventService._get_caldav_client(username)
+        if not client:
+            return None, None, None
+        
+        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
+        if not calendar_path:
+            return None, None, None
+        
+        return client, calendar_path, calendar_name
+
+    @staticmethod
     def create_event(
         db: Session, 
         event: EventCreate, 
@@ -69,12 +127,8 @@ class EventService:
         """
         Create a new event in the specified calendar via CalDAV.
         """
-        client = EventService._get_caldav_client(username)
-        if not client:
-            return None
-        
-        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
-        if not calendar_path:
+        client, calendar_path, calendar_name = EventService._get_caldav_client_for_calendar(db, username, calendar_id)
+        if not client or not calendar_path:
             return None
         
         try:
@@ -125,12 +179,8 @@ class EventService:
         """
         Get a specific event by its CalDAV URL.
         """
-        client = EventService._get_caldav_client(username)
-        if not client:
-            return None
-        
-        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
-        if not calendar_path:
+        client, calendar_path, calendar_name = EventService._get_caldav_client_for_calendar(db, username, calendar_id)
+        if not client or not calendar_path:
             return None
         
         try:
@@ -169,10 +219,7 @@ class EventService:
         If calendar_id is specified, only get events from that calendar.
         """
         import hashlib
-        
-        client = CalDAVClient()
-        if not client.connect(username, "admin"):
-            return []
+        from ..models import SharedCalendar
         
         try:
             # Build a map of calendar_path to calendar_id for proper ID assignment
@@ -181,15 +228,33 @@ class EventService:
             calendar_paths = []
             
             if calendar_id:
-                # Resolve the specific calendar
-                calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
-                if not calendar_path:
-                    return []
-                calendar_paths = [calendar_path]
-                calendar_id_map[calendar_path] = calendar_id
-                calendar_name_map[calendar_path] = calendar_name
+                # Check if this is a shared calendar
+                shared_calendar = db.query(SharedCalendar).filter(SharedCalendar.id == calendar_id).first()
+                if shared_calendar:
+                    # For shared calendar, connect with its credentials
+                    client = CalDAVClient()
+                    if client.connect(shared_calendar.radicale_username, shared_calendar.password):
+                        calendar_path = f"{shared_calendar.radicale_username}/{shared_calendar.name}"
+                        calendar_paths = [calendar_path]
+                        calendar_id_map[calendar_path] = calendar_id
+                        calendar_name_map[calendar_path] = shared_calendar.name
+                else:
+                    # For personal calendar
+                    client = EventService._get_caldav_client(username)
+                    if not client:
+                        return []
+                    calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
+                    if not calendar_path:
+                        return []
+                    calendar_paths = [calendar_path]
+                    calendar_id_map[calendar_path] = calendar_id
+                    calendar_name_map[calendar_path] = calendar_name
             else:
-                # All calendars - get from Radicale directly
+                # All calendars - get from Radicale directly for personal calendars
+                client = EventService._get_caldav_client(username)
+                if not client:
+                    return []
+                
                 raw_calendars = client.get_calendars()
                 for cal_info in raw_calendars:
                     cal_name = cal_info.get('name')
@@ -204,11 +269,45 @@ class EventService:
                     calendar_paths.append(cal_path)
                     calendar_id_map[cal_path] = url_hash
                     calendar_name_map[cal_path] = cal_name
+                
+                # Also add shared calendars with read access
+                from ..services.calendars import CalendarService
+                shared_calendars = CalendarService.get_shared_calendars_for_user(db, username)
+                for shared_cal in shared_calendars:
+                    if shared_cal.get('permission') in ['RW', 'RO']:
+                        client_shared = CalDAVClient()
+                        if client_shared.connect(shared_cal.get('radicale_username'), shared_cal.get('password')):
+                            cal_path = f"{shared_cal.get('radicale_username')}/{shared_cal.get('name')}"
+                            calendar_paths.append(cal_path)
+                            calendar_id_map[cal_path] = shared_cal.get('id')
+                            calendar_name_map[cal_path] = shared_cal.get('name')
             
             all_events = []
+            
+            # For each calendar path, we need to use the appropriate client
             for cal_path in calendar_paths:
+                # Determine which client to use based on the path
+                cal_id = calendar_id_map.get(cal_path)
+                
+                # Check if this is a shared calendar
+                if cal_id:
+                    shared_calendar = db.query(SharedCalendar).filter(SharedCalendar.id == cal_id).first()
+                    if shared_calendar:
+                        client_for_cal = CalDAVClient()
+                        if not client_for_cal.connect(shared_calendar.radicale_username, shared_calendar.password):
+                            continue
+                    else:
+                        # Personal calendar - use original client
+                        client_for_cal = EventService._get_caldav_client(username)
+                        if not client_for_cal:
+                            continue
+                else:
+                    client_for_cal = EventService._get_caldav_client(username)
+                    if not client_for_cal:
+                        continue
+                
                 try:
-                    events = client.get_events(cal_path, start, end)
+                    events = client_for_cal.get_events(cal_path, start, end)
                     cal_id = calendar_id_map.get(cal_path)
                     cal_name = calendar_name_map.get(cal_path)
                     for event_data in events:
@@ -251,12 +350,8 @@ class EventService:
         """
         Update an existing event in CalDAV.
         """
-        client = EventService._get_caldav_client(username)
-        if not client:
-            return None
-        
-        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
-        if not calendar_path:
+        client, calendar_path, calendar_name = EventService._get_caldav_client_for_calendar(db, username, calendar_id)
+        if not client or not calendar_path:
             return None
         
         try:
@@ -318,12 +413,8 @@ class EventService:
         """
         Delete an event from CalDAV.
         """
-        client = EventService._get_caldav_client(username)
-        if not client:
-            return False
-        
-        calendar_path, calendar_name = EventService._get_calendar_name_from_id(db, client, username, calendar_id)
-        if not calendar_path:
+        client, calendar_path, calendar_name = EventService._get_caldav_client_for_calendar(db, username, calendar_id)
+        if not client or not calendar_path:
             return False
         
         try:

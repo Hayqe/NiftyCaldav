@@ -31,6 +31,66 @@ async def read_all_users_simple(
     return [user[0] for user in users]
 
 
+@router.post("/sync", response_model=dict, summary="Sync user_settings with Radicale users")
+async def sync_users_with_radicale(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_admin_user)
+):
+    """
+    Synchronize user_settings table with Radicale users.
+    Removes user_settings entries for users that no longer exist in Radicale.
+    Admin only. Uses the current admin user's cached password.
+    """
+    from ..models import UserSettings
+    from ..services.caldav_client import CalDAVClient
+    from ..services.auth import AuthService
+    
+    # Get the current admin user's password from cache
+    admin_username = current_user["username"]
+    admin_password = AuthService.get_password_for_user(admin_username)
+    
+    if not admin_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password for {admin_username} not cached. Password cache is in-memory and cleared on API restart. Please log in again to refresh the cache."
+        )
+    
+    # Get all users from Radicale via API
+    client = CalDAVClient()
+    if not client.connect(admin_username, admin_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to connect to Radicale as {admin_username}."
+        )
+    
+    radicale_users = set(CalDAVClient.get_all_radicale_users(client))
+    
+    if not radicale_users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No users found in Radicale."
+        )
+    
+    # Get all user_settings from database
+    db_users = db.query(UserSettings).all()
+    
+    # Find users to delete (in user_settings but not in Radicale)
+    deleted_count = 0
+    for db_user in db_users:
+        if db_user.radicale_username not in radicale_users:
+            db.delete(db_user)
+            deleted_count += 1
+    
+    db.commit()
+    
+    return {
+        "message": f"Synchronized user_settings with Radicale. Deleted {deleted_count} orphaned entries.",
+        "deleted_count": deleted_count,
+        "radicale_users_count": len(radicale_users),
+        "user_settings_count": len(db_users) - deleted_count
+    }
+
+
 @router.get("/me", response_model=UserInDB, summary="Get current user info")
 async def read_current_user(
     current_user: Dict[str, Any] = Depends(get_current_user_info)

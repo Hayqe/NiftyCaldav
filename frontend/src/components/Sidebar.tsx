@@ -205,6 +205,11 @@ export default function Sidebar({ isCollapsed, setIsCollapsed }: SidebarProps) {
                   >
                     <div className="w-3 h-3 rounded-full flex-shrink-0 border border-white/20" style={{ backgroundColor: colorHex }} />
                     <span className="flex-1 text-sm truncate">{calendar.name}</span>
+                    {isCalendarActive(calendar.id) ? (
+                      <Eye className="w-4 h-4" />
+                    ) : (
+                      <EyeOff className="w-4 h-4 opacity-50" />
+                    )}
                   </div>
                 );
               })}

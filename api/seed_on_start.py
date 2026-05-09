@@ -38,7 +38,7 @@ def main():
     try:
         # List of users that should have settings pre-created
         # These users must exist in Radicale
-        users_to_seed = ['admin', 'testuser', 'user1', 'user2', 'user3']
+        users_to_seed = ['admin']
         
         for username in users_to_seed:
             settings = db.query(UserSettings).filter_by(radicale_username=username).first()

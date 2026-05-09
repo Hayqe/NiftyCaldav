@@ -4,6 +4,30 @@ from ..models import UserSettings
 
 
 class UserService:
+    @staticmethod
+    def get_all_radicale_users_via_api() -> List[str]:
+        """Get all users from Radicale server via CalDAV API.
+        
+        Only works if admin password is cached (from login).
+        Returns empty list if admin credentials are not available.
+        """
+        from .caldav_client import CalDAVClient
+        from .auth import AuthService
+        
+        # Get admin credentials from cache - NO fallback to hardcoded password
+        admin_password = AuthService.get_password_for_user("admin")
+        
+        if not admin_password:
+            # Admin password not in cache - cannot sync
+            print("Admin password not cached. Cannot sync users with Radicale.")
+            return []
+        
+        client = CalDAVClient()
+        if not client.connect("admin", admin_password):
+            print("Failed to connect to Radicale as admin.")
+            return []
+        
+        return CalDAVClient.get_all_radicale_users(client)
     """
     Service for managing user settings.
     

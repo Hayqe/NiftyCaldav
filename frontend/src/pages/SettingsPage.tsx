@@ -1,14 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bell, Palette, User, ChevronLeft, Upload, Users, Settings, Plus, Check, Copy, RefreshCw } from 'lucide-react';
+import { Bell, Palette, User, ChevronLeft, Upload, Users, Settings, Plus, Check, Copy, RefreshCw, Calendar as CalendarIcon, Trash2, X } from 'lucide-react';
 import { useAuth, useMySettings, useUsers } from '@/hooks';
 import { useMutation, useQueryClient, useQuery } from '@tanstack/react-query';
-import { usersApi } from '@/services/api';
+import { usersApi, calendarsApi, sharesApi } from '@/services/api';
 import { CALENDAR_COLORS, TIMEZONES, LANGUAGES } from '@/utils/constants';
 import LoadingSpinner from '@/components/LoadingSpinner';
 import type { User as UserType, UserSettings, ApiResponse } from '@/types';
 
-type TabType = 'profile' | 'notifications' | 'appearance' | 'users';
+type TabType = 'profile' | 'notifications' | 'appearance' | 'shared' | 'users';
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabType>('profile');
@@ -79,6 +79,13 @@ function SettingsSidebar({ activeTab, setActiveTab, user }: SettingsSidebarProps
             <Palette className="w-5 h-5" />
             <span>Uiterlijk</span>
           </button>
+          <button
+            onClick={() => setActiveTab('shared')}
+            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-left ${activeTab === 'shared' ? 'bg-primary-50 text-primary-700' : 'hover:bg-gray-50 text-gray-700'}`}
+          >
+            <CalendarIcon className="w-5 h-5" />
+            <span>Gedeelde agenda's</span>
+          </button>
           {user?.role === 'admin' && (
             <button
               onClick={() => setActiveTab('users')}
@@ -146,6 +153,9 @@ function SettingsContent({ activeTab, user }: SettingsContentProps) {
           isUpdatingSettings={false}
         />
       )}
+      {activeTab === 'shared' && (
+        <SharedTab />
+      )}
       {activeTab === 'users' && user?.role === 'admin' && (
         <UsersTab />
       )}
@@ -176,6 +186,24 @@ function UsersTab() {
     password: string;
     message: string;
   } | null>(null);
+
+  // Sync user_settings with Radicale users on tab open
+  const syncMutation = useMutation({
+    mutationFn: () => usersApi.syncWithRadicale(),
+    onSuccess: () => {
+      // Refresh users list after sync
+      queryClient.invalidateQueries({ queryKey: ['users'] });
+      queryClient.invalidateQueries({ queryKey: ['users-settings'] });
+    },
+    onError: (err) => {
+      console.error('Error syncing users with Radicale:', err);
+    }
+  });
+
+  // Sync on component mount (when tab is opened)
+  useEffect(() => {
+    syncMutation.mutate();
+  }, []);
 
   // Get list of users with settings
   const { data: usersData, isLoading: isLoadingUsers, refetch: refetchUsers } = useUsers();
@@ -338,6 +366,334 @@ function UsersTab() {
           });
         }}
       />
+    </div>
+  );
+}
+
+// Shared Tab Component
+function SharedTab() {
+  const { data: sharedCalendars, isLoading, refetch } = useQuery({
+    queryKey: ['my-shared-calendars'],
+    queryFn: () => calendarsApi.getMySharedCalendars().then(res => res.data),
+  });
+
+  // Get all users for autocomplete
+  const { data: allUsers, isLoading: isLoadingAllUsers } = useUsers();
+
+  const queryClient = useQueryClient();
+  
+  // State for add share modal
+  const [selectedCalendarId, setSelectedCalendarId] = useState<number | null>(null);
+  const [usernameInput, setUsernameInput] = useState('');
+  const [rightsInput, setRightsInput] = useState<'RW' | 'RO'>('RO');
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  // Mutation for adding a share
+  const addShareMutation = useMutation({
+    mutationFn: ({ calendarId, username, rights }: { calendarId: number; username: string; rights: 'RW' | 'RO' }) => 
+      sharesApi.addShare(calendarId, { user: username, rights }),
+    onSuccess: () => {
+      setIsAddModalOpen(false);
+      setUsernameInput('');
+      setRightsInput('RO');
+      setAddError(null);
+      queryClient.invalidateQueries({ queryKey: ['my-shared-calendars'] });
+      queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });
+    },
+    onError: (err) => {
+      setAddError(err instanceof Error ? err.message : 'Fout bij toevoegen gebruiker');
+    },
+  });
+
+  // Mutation for removing a share
+  const removeShareMutation = useMutation({
+    mutationFn: ({ calendarId, username }: { calendarId: number; username: string }) => 
+      sharesApi.removeShare(calendarId, username),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['my-shared-calendars'] });
+      queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });
+    },
+  });
+
+  // Mutation for updating share rights
+  const updateShareMutation = useMutation({
+    mutationFn: ({ calendarId, username, rights }: { calendarId: number; username: string; rights: 'RW' | 'RO' }) => 
+      sharesApi.updateShare(calendarId, username, { rights }),
+    onMutate: async ({ calendarId, username, rights }) => {
+      // Cancel any outgoing refetches to avoid overwriting optimistic update
+      await queryClient.cancelQueries({ queryKey: ['my-shared-calendars'] });
+      
+      // Snapshot the previous value
+      const previousCalendars = queryClient.getQueryData(['my-shared-calendars']);
+      
+      // Optimistically update to the new value
+      queryClient.setQueryData(['my-shared-calendars'], (old: any) => {
+        if (!old) return old;
+        return old.map((cal: any) => {
+          if (cal.id !== calendarId) return cal;
+          return {
+            ...cal,
+            shares: cal.shares?.map((share: any) => 
+              share.user === username ? { ...share, rights } : share
+            )
+          };
+        });
+      });
+      
+      // Return a context object with the snapshotted value
+      return { previousCalendars };
+    },
+    onError: (_err, _variables, context: any) => {
+      // Rollback to the previous value on error
+      queryClient.setQueryData(['my-shared-calendars'], context.previousCalendars);
+    },
+    onSettled: () => {
+      // Always refetch after error or success
+      queryClient.invalidateQueries({ queryKey: ['my-shared-calendars'] });
+      queryClient.invalidateQueries({ queryKey: ['calendars', 'shared'] });
+    },
+  });
+
+  const handleRemoveShare = (calendarId: number, username: string) => {
+    if (confirm(`Weet je zeker dat je de toegang voor ${username} wilt intrekken?`)) {
+      removeShareMutation.mutate({ calendarId, username });
+    }
+  };
+
+  const handleUpdateRights = (calendarId: number, username: string, currentRights: 'RW' | 'RO') => {
+    const newRights = currentRights === 'RW' ? 'RO' : 'RW';
+    updateShareMutation.mutate({ calendarId, username, rights: newRights });
+  };
+
+  const handleAddShare = (calendarId: number) => {
+    setSelectedCalendarId(calendarId);
+    setUsernameInput('');
+    setRightsInput('RO');
+    setAddError(null);
+    setIsAddModalOpen(true);
+  };
+
+  const handleSubmitAddShare = () => {
+    if (!usernameInput.trim()) {
+      setAddError('Gebruikersnaam is verplicht');
+      return;
+    }
+    
+    if (selectedCalendarId === null) return;
+    
+    addShareMutation.mutate({
+      calendarId: selectedCalendarId,
+      username: usernameInput.trim(),
+      rights: rightsInput
+    });
+  };
+
+  // Fetch shares for each calendar
+  const calendarsWithShares = useMemo(() => {
+    if (!sharedCalendars) return [];
+    return sharedCalendars;
+  }, [sharedCalendars]);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <LoadingSpinner size="lg" text="Gedeelde agenda's laden..." />
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-6">Gedeelde agenda's</h2>
+      
+      {calendarsWithShares.length === 0 ? (
+        <p className="text-gray-500">Je hebt nog geen agenda's gedeeld.</p>
+      ) : (
+        <div className="space-y-6">
+          {calendarsWithShares.map(calendar => (
+            <div key={calendar.id} className="border border-gray-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h3 className="font-medium text-gray-900">{calendar.name}</h3>
+                  <p className="text-sm text-gray-500">{calendar.description}</p>
+                </div>
+                <button
+                  onClick={() => handleAddShare(calendar.id)}
+                  className="btn btn-secondary btn-sm"
+                >
+                  Gebruiker toevoegen
+                </button>
+              </div>
+              
+              {/* Shares table for this calendar */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Gebruiker
+                      </th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                        Rechten
+                      </th>
+                      <th className="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">
+                        Acties
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {calendar.shares && calendar.shares.length > 0 ? (
+                      calendar.shares.map((share: any) => (
+                        <tr key={share.id} className="hover:bg-gray-50">
+                          <td className="px-4 py-2">
+                            <span className="font-medium text-gray-900">{share.user}</span>
+                          </td>
+                          <td className="px-4 py-2">
+                            <label className="relative inline-flex items-center cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={share.rights === 'RW'}
+                                onChange={() => handleUpdateRights(calendar.id, share.user, share.rights)}
+                                disabled={updateShareMutation.isPending}
+                                className="sr-only peer"
+                              />
+                              <div className={`w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600 ${updateShareMutation.isPending ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
+                              <span className="ml-2 text-sm font-medium text-gray-700">
+                                {share.rights}
+                              </span>
+                            </label>
+                          </td>
+                          <td className="px-4 py-2 text-right">
+                            <button
+                              onClick={() => handleRemoveShare(calendar.id, share.user)}
+                              className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50"
+                              title="Toegang intrekken"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3} className="px-4 py-4 text-center text-gray-500 text-sm">
+                          Geen gedeelde toegang
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Add Share Modal */}
+      {isAddModalOpen && selectedCalendarId && (
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={() => setIsAddModalOpen(false)}
+        >
+          <div
+            className="bg-white rounded-xl p-6 w-full max-w-md shadow-xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Gebruiker toevoegen</h3>
+              <button onClick={() => setIsAddModalOpen(false)} className="p-1 rounded-lg hover:bg-gray-100">
+                <X className="w-5 h-5 text-gray-400" />
+              </button>
+            </div>
+
+            {addError && (
+              <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm mb-4">
+                {addError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div className="relative">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Gebruikersnaam
+                </label>
+                <input
+                  type="text"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value)}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                  placeholder="Voer gebruikersnaam in"
+                />
+                {showSuggestions && usernameInput.trim() && allUsers && allUsers.length > 0 && (
+                  <div className="absolute z-10 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                    {allUsers
+                      .filter(user => 
+                        user.username.toLowerCase().includes(usernameInput.trim().toLowerCase()) &&
+                        user.username.toLowerCase() !== usernameInput.trim().toLowerCase()
+                      )
+                      .slice(0, 5)
+                      .map(user => (
+                        <button
+                          key={user.username}
+                          onClick={() => {
+                            setUsernameInput(user.username);
+                            setShowSuggestions(false);
+                          }}
+                          className="w-full px-4 py-2 text-left text-sm hover:bg-gray-50 transition-colors"
+                        >
+                          {user.username}
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Rechten
+                </label>
+                <select
+                  value={rightsInput}
+                  onChange={(e) => setRightsInput(e.target.value as 'RW' | 'RO')}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+                >
+                  <option value="RO">Alleen lezen (RO)</option>
+                  <option value="RW">Lezen & Schrijven (RW)</option>
+                </select>
+              </div>
+
+              <div className="flex gap-2 justify-end pt-4">
+                <button
+                  type="button"
+                  onClick={() => setIsAddModalOpen(false)}
+                  className="btn btn-secondary"
+                  disabled={addShareMutation.isPending}
+                >
+                  Annuleren
+                </button>
+                <button
+                  onClick={handleSubmitAddShare}
+                  className="btn btn-primary"
+                  disabled={addShareMutation.isPending || !usernameInput.trim()}
+                >
+                  {addShareMutation.isPending ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      <span>Toevoegen...</span>
+                    </>
+                  ) : (
+                    'Gebruiker toevoegen'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,10 +7,16 @@ from ..schemas.calendars import CalendarCreate
 
 class CalendarService:
     @staticmethod
-    def create_calendar_radicale(calendar: CalendarCreate, username: str) -> dict:
+    def create_calendar_radicale(calendar: CalendarCreate, username: str, password: Optional[str] = None) -> dict:
         """Create calendar directly in Radicale (no database)."""
+        if password is None:
+            from .auth import AuthService
+            password = AuthService.get_password_for_user(username)
+            if not password:
+                raise Exception(f"Password for {username} not cached. Please log in first.")
+        
         client = CalDAVClient()
-        if not client.connect(username, "admin"):
+        if not client.connect(username, password):
             raise Exception("Failed to connect to CalDAV")
         
         if client.calendar_exists(calendar.name):

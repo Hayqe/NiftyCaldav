@@ -100,8 +100,12 @@ class ICSImportService:
                 return False, "Geen afspraken gevonden in het bestand.", 0, ["No events"]
             
             # 2. Setup connection ONCE
+            from .auth import AuthService
+            password = AuthService.get_password_for_user(username)
+            if not password:
+                password = "admin"
             client = CalDAVClient()
-            if not client.connect(username, "admin"):
+            if not client.connect(username, password):
                 return False, "Verbinding met de kalenderserver mislukt.", 0, ["Connection failed"]
             
             # 3. Resolve path and get calendar object ONCE

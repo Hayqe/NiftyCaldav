@@ -62,6 +62,45 @@ class CalDAVClient:
             return None
         return self.client.principal()
     
+    @staticmethod
+    def get_all_radicale_users(client: 'CalDAVClient') -> List[str]:
+        """
+        Get all user principals from Radicale server via PROPFIND.
+        Returns list of usernames.
+        Requires admin connection to Radicale.
+        """
+        try:
+            url = f"{client.radicale_url}/"
+            username = client.client.username if hasattr(client.client, 'username') else None
+            password = client.client.password if hasattr(client.client, 'password') else None
+            
+            if not username or not password:
+                return []
+            
+            response = requests.request(
+                'PROPFIND',
+                url,
+                auth=HTTPBasicAuth(username, password),
+                headers={'Depth': '1'}
+            )
+            
+            if response.status_code != 207:
+                return []
+            
+            # Parse XML response to extract user principals
+            # Radicale returns user URLs like /username/
+            users = set()
+            content = response.text
+            matches = re.findall(r'<href>/([^/]+)/</href>', content)
+            for match in matches:
+                if match and match != '':
+                    users.add(match)
+            
+            return list(users)
+        except Exception as e:
+            print(f"Error getting Radicale users: {e}")
+            return []
+    
     def get_calendar_color(self, calendar_url: str) -> Optional[str]:
         """Get the color of a calendar from Radicale via PROPFIND."""
         try:

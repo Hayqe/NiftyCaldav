@@ -25,6 +25,7 @@ export default function HomePage() {
   const {
     myCalendars,
     sharedCalendars,
+    isLoadingCalendars,
     view,
     selectedDate,
     getActiveCalendarIds,
@@ -210,9 +211,9 @@ export default function HomePage() {
     const isOwner = myCalendars.some(c => c.id === calendarId);
     if (isOwner) return true;
     
-    // Check shared calendars with write/admin permission
+    // Check shared calendars with RW permission
     const sharedCal = sharedCalendars.find(c => c.id === calendarId);
-    return sharedCal?.permission === 'write' || sharedCal?.permission === 'admin';
+    return sharedCal?.permission === 'RW';
   };
 
   // Handle clicking on an existing event to edit
@@ -1021,7 +1022,7 @@ export default function HomePage() {
                     </option>
                   ))}
                   {sharedCalendars
-                    .filter(cal => cal.permission === 'write' || cal.permission === 'admin')
+                    .filter(cal => cal.permission === 'RW')
                     .map(calendar => (
                       <option key={calendar.id} value={calendar.id}>
                         {calendar.name} (gedeeld)

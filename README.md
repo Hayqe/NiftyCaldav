@@ -26,8 +26,9 @@ NiftyCaldav/
 │   │   └── main.tsx
 │   ├── cypress/                  # E2E tests
 │   └── Dockerfile
-├── radicale-config/              # Radicale configuratie
-│   └── users                     # htpasswd gebruikersbestand
+├── radicale-config/              # Radicale configuratie (automatisch aangemaakt)
+├── radicale-data/                # Radicale data (agenda's, events)
+├── setup-radicale.sh             # Setup script voor eerstmalige configuratie
 ├── docker-compose.yml
 ├── README.md
 └── prd.md                       # Product Requirements Document
@@ -37,17 +38,28 @@ NiftyCaldav/
 
 ## 🚀 Snelle Start
 
-### Docker
+### Vereiste: Python 3 en bcrypt
+Radicale vereist de `bcrypt` module. Deze wordt automatisch geïnstalleerd bij het opstarten van de container.
+
+### Eerstmalige Setup
+Voer het setup script uit om de Radicale data folder en admin gebruiker aan te maken:
+```bash
+./setup-radicale.sh
+```
+Het script vraagt om een admin wachtwoord en maakt de benodigde folders en files aan.
+
+### Docker opstarten
 ```bash
 docker compose up -d
 ```
+
 Toegang:
 - **Frontend**: http://localhost:3330
 - **API Docs (Swagger)**: http://localhost:8880/docs
 - **API Redoc**: http://localhost:8880/redoc
 - **Radicale**: http://localhost:5232
 
-Default inloggegevens: `admin` / `admin`
+Inloggen met de admin gebruiker die je hebt aangemaakt tijdens de setup.
 
 ---
 
@@ -91,6 +103,7 @@ MIT License
 
 ```bash
 # Commando's
+./setup-radicale.sh            # Eerstmalige setup (admin gebruiker aanmaken)
 docker compose up -d          # Start alles
 docker compose down            # Stop alles
 docker compose build --no-cache # Rebuild

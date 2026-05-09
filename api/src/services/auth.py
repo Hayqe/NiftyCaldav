@@ -1,12 +1,16 @@
 import os
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import jwt
 
 # JWT Configuration
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+# In-memory cache for user passwords (username -> password)
+# This is populated at login time
+_user_password_cache: Dict[str, str] = {}
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -65,6 +69,10 @@ class AuthService:
         
         client = CalDAVClient()
         if client.connect(username, password):
+            # Store password in cache for later use with CalDAV operations
+            global _user_password_cache
+            _user_password_cache[username] = password
+            
             # For now, we determine role based on username
             # In production, you might have a way to get role from Radicale
             # or maintain a separate role mapping
@@ -92,3 +100,12 @@ class AuthService:
             "username": payload.get("username"),
             "role": payload.get("role", "user")
         }
+
+    @staticmethod
+    def get_password_for_user(username: str) -> Optional[str]:
+        """
+        Get the cached password for a user.
+        Returns the password if cached, None otherwise.
+        """
+        global _user_password_cache
+        return _user_password_cache.get(username)

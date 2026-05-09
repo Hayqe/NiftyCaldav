@@ -6,7 +6,8 @@ from ..database import get_db
 from ..models import SharedCalendar, CalendarShare
 from ..schemas.calendars import (
     CalendarCreate, CalendarRadicale, CalendarRadicaleWithShares,
-    CalendarWithSharingInfo, SharedCalendarInDB, CalendarShareInDB, CalendarShareCreate
+    CalendarWithSharingInfo, SharedCalendarInDB, CalendarShareInDB, CalendarShareCreate,
+    SharedCalendarWithShares
 )
 from ..services.caldav_client import CalDAVClient
 from ..services.calendars import CalendarService
@@ -55,8 +56,17 @@ async def read_calendars(
     Shared calendars are available via /calendars/shared.
     """
     username = current_user["username"]
+    
+    # Get password from cache (stored at login time)
+    from ..services.auth import AuthService
+    password = AuthService.get_password_for_user(username)
+    
+    if not password:
+        # Fallback to "admin" for demo purposes, but this won't work for most users
+        password = "admin"
+    
     client = CalDAVClient()
-    if not client.connect(username, "admin"):
+    if not client.connect(username, password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to connect to CalDAV"
@@ -121,8 +131,22 @@ async def create_shared_calendar(
     username = f"shared_{generate_random_string(8)}"
     password = generate_random_string(16)
     
+    # Add the new user to Radicale's htpasswd file first
+    from ..services.radicale_users import add_user_to_htpasswd
+    from ..services.users import UserService
+    try:
+        add_user_to_htpasswd(username, password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to create user in Radicale: {str(e)}"
+        )
+    
+    # Create user settings in database (so user appears in autocomplete)
+    UserService.get_or_create_user_settings(db, username)
+    
     # Create calendar in Radicale with the new user
-    result = CalendarService.create_calendar_radicale(calendar, username)
+    result = CalendarService.create_calendar_radicale(calendar, username, password)
     
     # Store calendar in database with system credentials
     db_calendar = SharedCalendar(
@@ -138,6 +162,36 @@ async def create_shared_calendar(
     db.refresh(db_calendar)
     
     return db_calendar
+
+
+# Get shared calendars owned by current user
+@router.get("/shared/my", response_model=List[SharedCalendarWithShares], summary="Get shared calendars owned by current user")
+async def read_my_shared_calendars(
+    db: Session = Depends(get_db),
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
+):
+    """
+    Get all shared calendars owned by the current user with their shares.
+    """
+    shared_calendars = CalendarService.get_shared_calendars_by_owner(db, current_user["username"])
+    
+    # Load shares for each calendar
+    result = []
+    for calendar in shared_calendars:
+        shares = CalendarService.get_shares_for_calendar(db, calendar.id)
+        calendar_dict = calendar.__dict__
+        calendar_dict['shares'] = [
+            {
+                'id': s.id,
+                'user': s.user,
+                'rights': s.rights,
+                'created_at': s.created_at.isoformat() if s.created_at else None
+            }
+            for s in shares
+        ]
+        result.append(calendar_dict)
+    
+    return result
 
 
 # Get shared calendars for current user
@@ -343,8 +397,16 @@ async def read_calendar(
     Get calendar by ID (hash from URL) directly from Radicale.
     """
     username = current_user["username"]
+    
+    # Get password from cache (stored at login time)
+    from ..services.auth import AuthService
+    password = AuthService.get_password_for_user(username)
+    
+    if not password:
+        password = "admin"
+    
     client = CalDAVClient()
-    if not client.connect(username, "admin"):
+    if not client.connect(username, password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to connect to CalDAV"
@@ -392,8 +454,16 @@ async def update_calendar(
     Currently limited to description updates.
     """
     username = current_user["username"]
+    
+    # Get password from cache (stored at login time)
+    from ..services.auth import AuthService
+    password = AuthService.get_password_for_user(username)
+    
+    if not password:
+        password = "admin"
+    
     client = CalDAVClient()
-    if not client.connect(username, "admin"):
+    if not client.connect(username, password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to connect to CalDAV"
@@ -433,8 +503,16 @@ async def delete_calendar(
     Delete calendar directly from Radicale.
     """
     username = current_user["username"]
+    
+    # Get password from cache (stored at login time)
+    from ..services.auth import AuthService
+    password = AuthService.get_password_for_user(username)
+    
+    if not password:
+        password = "admin"
+    
     client = CalDAVClient()
-    if not client.connect(username, "admin"):
+    if not client.connect(username, password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Failed to connect to CalDAV"
