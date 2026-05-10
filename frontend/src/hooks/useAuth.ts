@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/services/api';
 import { jwtDecode } from '@/utils';
-import type { User, LoginCredentials, AuthState } from '@/types';
+import type { User, LoginCredentials } from '@/types';
 
 interface TokenPayload {
   username: string;
@@ -22,11 +22,9 @@ interface UseAuthReturn {
   isAuthenticated: boolean;
   isLoading: boolean;
   error: Error | null;
-  mustChangePassword: boolean;
-  login: (credentials: LoginCredentials) => Promise<void>;
+  login: (credentials: LoginCredentials) => Promise<LoginResponse>;
   logout: () => Promise<void>;
   changePassword: (data: { current_password?: string; new_password: string }) => Promise<void>;
-  clearMustChangePassword: () => void;
 }
 
 // Helper to decode JWT token and extract user info
@@ -40,35 +38,28 @@ function decodeToken(token: string): TokenPayload | null {
 }
 
 // Helper to create User object from token payload
-function createUserFromPayload(payload: TokenPayload | null, mustChangePassword: boolean = false): User | null {
+function createUserFromPayload(payload: TokenPayload | null): User | null {
   if (!payload) return null;
   return {
     username: payload.username,
     role: payload.role as 'admin' | 'user',
-    must_change_password: mustChangePassword,
   };
 }
 
 export function useAuth(): UseAuthReturn {
   const [error, setError] = useState<Error | null>(null);
   const [userState, setUserState] = useState<User | null>(null);
-  const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
   const queryClient = useQueryClient();
 
   // Parse token from localStorage on mount
   useEffect(() => {
     const token = localStorage.getItem('token');
     const userStr = localStorage.getItem('user');
-    const mustChangePw = localStorage.getItem('must_change_password') === 'true';
-    
-    if (mustChangePw) {
-      setMustChangePassword(true);
-    }
-    
+
     if (token) {
       try {
         const payload = decodeToken(token);
-        const user = createUserFromPayload(payload, mustChangePw);
+        const user = createUserFromPayload(payload);
         if (user) {
           localStorage.setItem('user', JSON.stringify(user));
           setUserState(user);
@@ -77,7 +68,6 @@ export function useAuth(): UseAuthReturn {
           // Clear invalid token
           localStorage.removeItem('token');
           localStorage.removeItem('user');
-          localStorage.removeItem('must_change_password');
         }
       } catch {
         // Token invalid, try to use cached user if available
@@ -91,7 +81,7 @@ export function useAuth(): UseAuthReturn {
         }
         // Clear invalid token
         localStorage.removeItem('token');
-        localStorage.removeItem('must_change_password');
+        localStorage.removeItem('user');
       }
     } else if (userStr) {
       try {
@@ -104,20 +94,19 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const isAuthenticated = !!userState || !!localStorage.getItem('token');
+  const isLoading = false; // Simplified - loading state handled per-operation
 
-  // Login mutation
+  // Login mutation - returns the response directly
   const loginMutation = useMutation({
     mutationFn: authApi.login,
     onSuccess: (response) => {
-      const { access_token, must_change_password } = response.data;
+      const { access_token } = response.data;
       localStorage.setItem('token', access_token);
-      localStorage.setItem('must_change_password', String(must_change_password));
-      setMustChangePassword(must_change_password);
       
       // Decode token to get user info
       try {
         const payload = decodeToken(access_token);
-        const user = createUserFromPayload(payload, must_change_password);
+        const user = createUserFromPayload(payload);
         if (user) {
           localStorage.setItem('user', JSON.stringify(user));
           setUserState(user);
@@ -139,6 +128,7 @@ export function useAuth(): UseAuthReturn {
       if (err instanceof Error) {
         setError(err);
       }
+      throw err;
     },
   });
 
@@ -148,9 +138,7 @@ export function useAuth(): UseAuthReturn {
     onSuccess: () => {
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      localStorage.removeItem('must_change_password');
       setUserState(null);
-      setMustChangePassword(false);
       setError(null);
       queryClient.clear();
       
@@ -163,55 +151,45 @@ export function useAuth(): UseAuthReturn {
       if (err instanceof Error) {
         setError(err);
       }
+      // If logout fails, just clear local storage
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      setUserState(null);
+      queryClient.clear();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
     },
   });
 
   // Change password mutation
   const changePasswordMutation = useMutation({
     mutationFn: authApi.changePassword,
-    onSuccess: (response) => {
+    onSuccess: () => {
       setError(null);
-      setMustChangePassword(false);
-      localStorage.removeItem('must_change_password');
-      // Update user state
-      if (userState) {
-        setUserState({ ...userState, must_change_password: false });
-      }
       queryClient.invalidateQueries({ queryKey: ['auth'] });
     },
     onError: (err) => {
       if (err instanceof Error) {
         setError(err);
       }
+      throw err;
     },
   });
 
-  const clearMustChangePassword = useCallback(() => {
-    setMustChangePassword(false);
-    localStorage.removeItem('must_change_password');
-    if (userState) {
-      setUserState({ ...userState, must_change_password: false });
-    }
-  }, [userState]);
-
-  const login = useCallback(async (credentials: LoginCredentials) => {
-    try {
-      await loginMutation.mutateAsync(credentials);
-    } catch (err) {
-      throw err;
-    }
+  const login = useCallback(async (credentials: LoginCredentials): Promise<LoginResponse> => {
+    return await loginMutation.mutateAsync(credentials);
   }, [loginMutation]);
 
   const logout = useCallback(async () => {
     try {
       await logoutMutation.mutateAsync();
-    } catch (err) {
-      // If logout fails, just clear local storage
+    } catch {
+      // Fallback: clear manually
       localStorage.removeItem('token');
       localStorage.removeItem('user');
-      localStorage.removeItem('must_change_password');
       setUserState(null);
-      setMustChangePassword(false);
+      setError(null);
       queryClient.clear();
       if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
         window.location.href = '/login';
@@ -226,12 +204,10 @@ export function useAuth(): UseAuthReturn {
   return {
     user: userState,
     isAuthenticated,
-    isLoading: loginMutation.isPending || logoutMutation.isPending,
+    isLoading,
     error,
-    mustChangePassword,
     login,
     logout,
     changePassword,
-    clearMustChangePassword,
   };
 }

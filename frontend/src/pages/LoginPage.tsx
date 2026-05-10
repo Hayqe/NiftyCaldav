@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Eye, EyeOff, Key } from 'lucide-react';
 import { useAuth } from '@/hooks';
@@ -14,34 +14,34 @@ export default function LoginPage() {
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  
-  const { login, isLoading, isAuthenticated, mustChangePassword, changePassword, clearMustChangePassword } = useAuth();
+  const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const { login, logout, changePassword } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname || '/';
 
-  // Redirect if already authenticated and no password change required
-  useEffect(() => {
-    if (isAuthenticated && !mustChangePassword) {
-      navigate(from, { replace: true });
-    }
-  }, [isAuthenticated, mustChangePassword, from, navigate]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
+    setIsLoading(true);
+
     if (!username.trim() || !password.trim()) {
       setError('Vul alle velden in');
+      setIsLoading(false);
       return;
     }
 
     try {
-      await login({ username, password });
-      // If mustChangePassword is true, don't redirect yet
-      if (!mustChangePassword) {
-        navigate(from, { replace: true });
+      const response = await login({ username, password });
+      
+      // Direct check uit de API response
+      if (response.data.must_change_password) {
+        setShowPasswordForm(true);  // Toon wachtwoord-form
+      } else {
+        navigate(from, { replace: true });  // Normale redirect
       }
     } catch (err) {
       if (err instanceof Error) {
@@ -49,35 +49,45 @@ export default function LoginPage() {
       } else {
         setError('Inloggen mislukt. Controleer je gebruikersnaam en wachtwoord.');
       }
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
+    setIsLoading(true);
+
     if (newPassword !== confirmNewPassword) {
       setError('Nieuwe wachtwoorden komen niet overeen');
+      setIsLoading(false);
       return;
     }
-    
+
     if (newPassword.length < 8) {
       setError('Wachtwoord moet minstens 8 tekens bevatten');
+      setIsLoading(false);
       return;
     }
 
     try {
-      // Change password without verifying current password (flag is set)
       await changePassword({ new_password: newPassword });
-      clearMustChangePassword();
-      navigate(from, { replace: true });
+      // Succes: redirect naar login (geen logout nodig, token is nog geldig maar otp=0)
+      window.location.href = '/login';
     } catch (err) {
       setError('Fout bij wijzigen wachtwoord. Probeer het opnieuw.');
+      setIsLoading(false);
     }
   };
 
-  // If already logged in and must change password, show password change form
-  if (isAuthenticated && mustChangePassword) {
+  const handleCancelPasswordChange = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
+
+  // Toon wachtwoord-wijzigscherm
+  if (showPasswordForm) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
         <div className="w-full max-w-md">
@@ -111,6 +121,7 @@ export default function LoginPage() {
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12"
                   placeholder="Nieuw wachtwoord (min. 8 tekens)"
                   minLength={8}
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
@@ -132,6 +143,7 @@ export default function LoginPage() {
                   onChange={(e) => setConfirmNewPassword(e.target.value)}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent pr-12"
                   placeholder="Bevestig nieuw wachtwoord"
+                  disabled={isLoading}
                 />
                 <button
                   type="button"
@@ -142,20 +154,30 @@ export default function LoginPage() {
                 </button>
               </div>
 
-              <button
-                type="submit"
-                disabled={isLoading || !newPassword.trim() || !confirmNewPassword.trim()}
-                className="w-full bg-primary-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {isLoading ? (
-                  <>
-                    <LoadingSpinner size="sm" />
-                    Wachtwoord wijzigen...
-                  </>
-                ) : (
-                  'Wachtwoord wijzigen'
-                )}
-              </button>
+              <div className="flex gap-4">
+                <button
+                  type="button"
+                  onClick={handleCancelPasswordChange}
+                  className="flex-1 border border-gray-300 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-500 transition-colors"
+                  disabled={isLoading}
+                >
+                  Annuleren
+                </button>
+                <button
+                  type="submit"
+                  disabled={isLoading || !newPassword.trim() || !confirmNewPassword.trim()}
+                  className="flex-1 bg-primary-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {isLoading ? (
+                    <>
+                      <LoadingSpinner size="sm" />
+                      Wachtwoord wijzigen...
+                    </>
+                  ) : (
+                    'Wachtwoord wijzigen'
+                  )}
+                </button>
+              </div>
             </form>
           </div>
         </div>
@@ -163,6 +185,7 @@ export default function LoginPage() {
     );
   }
 
+  // Normaal login scherm
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
       <div className="w-full max-w-md">

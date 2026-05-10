@@ -205,15 +205,21 @@ async def change_own_password(
     current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
-    Change the current user's password in Radicale.
-    
-    Note: This is a placeholder. In production, you would need to:
-    1. Update the password in Radicale's htpasswd file
-    2. Clear the OTP flag
-    
-    For now, we just clear the OTP flag to simulate password change.
+    Change the current user's password in Radicale's htpasswd file.
     """
+    from ..services.radicale_users import update_user_password
+    
     username = current_user["username"]
+    new_password = password_data.new_password
+    
+    # Update password in Radicale's htpasswd file
+    try:
+        update_user_password(username, new_password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update password in Radicale: {str(e)}"
+        )
     
     # Clear OTP flag after password change
     settings = UserService.get_or_create_user_settings(db, username)
@@ -222,7 +228,7 @@ async def change_own_password(
     db.refresh(settings)
     
     return PasswordChangeResponse(
-        message="Password changed successfully (password update in Radicale not implemented)",
+        message="Password changed successfully",
         must_change_password=False
     )
 
@@ -236,9 +242,20 @@ async def change_user_password(
 ):
     """
     Change another user's password (admin only).
-    
-    Note: This is a placeholder. Actual password change in Radicale is not implemented.
     """
+    from ..services.radicale_users import update_user_password
+    
+    new_password = password_data.new_password
+    
+    # Update password in Radicale's htpasswd file
+    try:
+        update_user_password(username, new_password)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to update password in Radicale: {str(e)}"
+        )
+    
     # Clear OTP flag
     settings = UserService.get_or_create_user_settings(db, username)
     settings.otp = False
@@ -246,7 +263,7 @@ async def change_user_password(
     db.refresh(settings)
     
     return PasswordChangeResponse(
-        message=f"Password changed for {username} (password update in Radicale not implemented)",
+        message=f"Password changed for {username}",
         must_change_password=False
     )
 
