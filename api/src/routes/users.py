@@ -19,7 +19,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.get("/all-simple", response_model=List[str], summary="Get all users with settings (simple list)")
 async def read_all_users_simple(
     db: Session = Depends(get_db),
-    current_user: Dict[str, Any] = Depends(get_admin_user)
+    current_user: Dict[str, Any] = Depends(get_current_active_user)
 ):
     """
     Get a simple list of all users that have settings in the database.
